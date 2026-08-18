@@ -22,6 +22,9 @@ checkpoint:
 run_store:
   backend: sqlite
   path: var/runs.sqlite
+provider_store:
+  backend: sqlite
+  path: var/providers.sqlite
 trace:
   enabled: true
   sample_rate: 1.0

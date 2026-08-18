@@ -3,6 +3,7 @@ from pathlib import Path
 import pytest
 
 from work_harness.config.loader import load_app_config
+from work_harness.config.models import ModelCandidateConfig
 from work_harness.domain.models import ModelMessage, ModelRequest, Plan
 from work_harness.llm.gateway import ModelGateway
 from work_harness.llm.mock import MockProvider
@@ -66,3 +67,51 @@ async def test_request_can_pin_compatible_provider_candidate() -> None:
     response = await gateway.complete(request)
 
     assert response.provider == "mock-secondary"
+
+
+@pytest.mark.asyncio
+async def test_agent_route_prefers_provider_for_one_subagent() -> None:
+    config = load_app_config(PROJECT_ROOT)
+    models = config.models.model_copy(
+        update={
+            "agent_routes": {
+                "worker-02": ModelCandidateConfig(
+                    provider="mock-secondary", model="worker-02-model"
+                )
+            }
+        }
+    )
+    gateway = ModelGateway(
+        models,
+        {
+            "mock": MockProvider("mock"),
+            "mock-secondary": MockProvider("mock-secondary"),
+        },
+        config.runtime,
+    )
+    request = ModelRequest(
+        run_id="run_agent_route",
+        trace_id="trace_agent_route",
+        node_name="worker",
+        agent_role="worker-02",
+        logical_model="worker-fast",
+        messages=[ModelMessage(role="user", content="plan")],
+        required_capabilities={"chat", "structured_output"},
+        response_schema=Plan.model_json_schema(),
+        metadata={"operation": "plan", "payload": {"task": {"goal": "test"}}},
+    )
+
+    response = await gateway.complete(request)
+
+    assert response.provider == "mock-secondary"
+    assert response.model == "worker-02-model"
+
+    explicitly_pinned = request.model_copy(
+        update={
+            "provider_allowlist": {"mock"},
+            "provider_preferences": ["mock"],
+        }
+    )
+    pinned_response = await gateway.complete(explicitly_pinned)
+
+    assert pinned_response.provider == "mock"

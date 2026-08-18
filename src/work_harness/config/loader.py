@@ -17,7 +17,13 @@ from work_harness.config.models import (
 
 
 def default_project_root() -> Path:
-    return Path(__file__).resolve().parents[3]
+    source_root = Path(__file__).resolve().parents[3]
+    package_root = Path(__file__).resolve().parents[1]
+    candidates = (source_root, Path.cwd(), package_root / "_runtime")
+    for candidate in candidates:
+        if (candidate / "config" / "runtime.yaml").is_file():
+            return candidate.resolve()
+    return source_root
 
 
 def _load_yaml(path: Path) -> dict[str, Any]:
@@ -65,6 +71,12 @@ def load_app_config(project_root: Path | str | None = None) -> AppConfig:
         runtime_data = _deep_merge(
             runtime_data,
             {"run_store": {"path": run_store_override}},
+        )
+    provider_store_override = os.getenv("WORK_HARNESS_PROVIDER_STORE_PATH")
+    if provider_store_override:
+        runtime_data = _deep_merge(
+            runtime_data,
+            {"provider_store": {"path": provider_store_override}},
         )
     log_level = os.getenv("WORK_HARNESS_LOG_LEVEL")
     if log_level:

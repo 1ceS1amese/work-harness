@@ -288,6 +288,8 @@ class ModelMessage(ContractModel):
     content: str = ""
     tool_call_id: str | None = None
     tool_calls: list[dict[str, Any]] | None = None
+    reasoning_content: str | None = None
+    response_items: list[dict[str, Any]] | None = None
 
     @model_validator(mode="after")
     def validate_tool_message(self) -> ModelMessage:
@@ -295,6 +297,10 @@ class ModelMessage(ContractModel):
             raise ValueError("tool messages require tool_call_id")
         if self.tool_calls and self.role != MessageRole.ASSISTANT:
             raise ValueError("tool_calls are only valid on assistant messages")
+        if self.reasoning_content and self.role != MessageRole.ASSISTANT:
+            raise ValueError("reasoning_content is only valid on assistant messages")
+        if self.response_items and self.role != MessageRole.ASSISTANT:
+            raise ValueError("response_items are only valid on assistant messages")
         return self
 
 
@@ -328,6 +334,8 @@ class ModelResponse(ContractModel):
     content: str = ""
     structured_output: dict[str, Any] | None = None
     tool_calls: list[dict[str, Any]] = Field(default_factory=list)
+    reasoning_content: str | None = None
+    response_items: list[dict[str, Any]] = Field(default_factory=list)
     finish_reason: str = "stop"
     usage: Usage = Field(default_factory=Usage)
     latency_ms: int = Field(default=0, ge=0)

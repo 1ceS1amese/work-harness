@@ -122,12 +122,13 @@ Copy-Item .env.example .env
 ```text
 var/checkpoints.sqlite
 var/runs.sqlite
+var/providers.sqlite
 ```
 
 默认开发包不携带宿主机数据。如果确实需要继续宿主机里的运行和人工审批状态：
 
 1. 先停止宿主机和虚拟机中的 Work Harness；
-2. 将宿主机 `var/checkpoints.sqlite` 与 `var/runs.sqlite` 单独复制到虚拟机的 `var/`；
+2. 将宿主机 `var/checkpoints.sqlite`、`var/runs.sqlite` 与 `var/providers.sqlite` 单独复制到虚拟机的 `var/`；
 3. 不要在数据库仍被进程写入时复制；
 4. 将数据库按敏感运行数据处理，不通过公开渠道传输；
 5. 启动后通过 `GET /v1/runs` 和目标 `GET /v1/runs/{run_id}` 验证。
@@ -137,8 +138,9 @@ var/runs.sqlite
 ## 接续开发前检查
 
 ```powershell
-uv run ruff check src tests
+uv run ruff check src tests scripts
 uv run pytest
+uv run work-harness check-compatibility
 uv run work-harness eval
 cd frontend
 npm run type-check
@@ -146,4 +148,4 @@ npm run test -- --run
 npm run build
 ```
 
-当前基线为后端 32 项测试、前端 8 项测试和 10/10 Mock 契约评估通过。Mock 评估只验证工程流程，不代表真实模型质量。
+当前基线为后端 56 项测试、前端 13 项测试和 10/10 Mock 契约评估通过。Mock 评估只验证工程流程，不代表真实模型质量。

@@ -13,6 +13,8 @@ class CompatibilityModel(BaseModel):
 class ProviderCompatibilityItem(CompatibilityModel):
     provider: str
     adapter: str
+    protocol_variant: str
+    api_family: str
     protocol_version: str
     capabilities: list[str]
     configured_capabilities: list[str]
@@ -63,6 +65,8 @@ def inspect_provider_compatibility(
             ProviderCompatibilityItem(
                 provider=name,
                 adapter=provider_config.adapter,
+                protocol_variant=provider_config.protocol_variant,
+                api_family=provider_config.api_family,
                 protocol_version=actual_protocol,
                 capabilities=sorted(actual_capabilities),
                 configured_capabilities=sorted(provider_config.capabilities),

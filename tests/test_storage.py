@@ -2,8 +2,15 @@ from pathlib import Path
 
 import pytest
 
+from work_harness.config.models import ProviderConfig
 from work_harness.domain.enums import RunStatus
-from work_harness.storage import MemoryRunStore, RunRecord, SQLiteRunStore
+from work_harness.storage import (
+    MemoryRunStore,
+    ProviderProfileSpec,
+    RunRecord,
+    SQLiteProviderProfileStore,
+    SQLiteRunStore,
+)
 
 
 @pytest.mark.asyncio
@@ -48,6 +55,46 @@ async def test_sqlite_store_survives_reopen(tmp_path: Path) -> None:
     assert recovered is not None
     assert recovered.status == RunStatus.WAITING_HUMAN
     assert [item.run_id for item in await reopened.list()] == ["run_persisted"]
+    await reopened.close()
+
+
+@pytest.mark.asyncio
+async def test_sqlite_provider_profiles_survive_reopen_without_secrets(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "providers.sqlite"
+    profile = ProviderProfileSpec(
+        config=ProviderConfig(
+            adapter="openai_compatible",
+            protocol_variant="openai",
+            api_family="responses",
+            enabled=False,
+            base_url="https://custom-model.test/v1",
+            api_key_env="TEAM_MODEL_API_KEY",
+            allowed_models=["test-model"],
+            capabilities={"chat", "structured_output", "tool_calling"},
+        ),
+        model_bindings={"worker-fast": "test-model"},
+        agent_bindings={"main": "test-model", "worker-02": "test-model"},
+    )
+    first_store = SQLiteProviderProfileStore(path)
+    await first_store.initialize()
+    saved = await first_store.upsert("custom-gateway", profile)
+    await first_store.close()
+
+    reopened = SQLiteProviderProfileStore(path)
+    await reopened.initialize()
+    recovered = await reopened.get("custom-gateway")
+
+    assert recovered is not None
+    assert recovered.created_at == saved.created_at
+    assert recovered.config.api_key_env == "TEAM_MODEL_API_KEY"
+    assert recovered.model_bindings == {"worker-fast": "test-model"}
+    assert recovered.agent_bindings == {
+        "main": "test-model",
+        "worker-02": "test-model",
+    }
+    assert b"sk-" not in path.read_bytes()
     await reopened.close()
 
 

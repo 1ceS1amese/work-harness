@@ -2,11 +2,12 @@
 
 ## 目标
 
-持久化层解决三个相互独立的问题：
+持久化层解决四个相互独立的问题：
 
 1. LangGraph 执行状态可以在进程重启后恢复；
 2. run_id、状态和幂等关系可以被可靠查询；
 3. 前端群聊在刷新页面后可以继续展示。
+4. Provider 的非敏感配置和模型映射可以在进程重启后恢复。
 
 这些状态不能写进同一张业务表，也不能由 `RunManager` 直接操作具体数据库。
 
@@ -16,9 +17,25 @@
 |---|---|---|---|
 | Workflow Checkpoint | LangGraph Checkpointer | Graph State、任务、计划、产物、复核、中断点 | `var/checkpoints.sqlite` |
 | Run Index | `RunStore` | run_id、状态、时间、幂等哈希、请求指纹 | `var/runs.sqlite` |
+| Provider Profile | `ProviderProfileStore` | Adapter、协议变体、端点、密钥环境变量名、模型映射、逐 Agent 路由 | `var/providers.sqlite` |
 | UI Conversation | `ConversationStorage` | 群聊、消息、选择项、活动会话 | 浏览器 localStorage |
 
 RunStore 不保存原始幂等键和完整请求，只保存 SHA-256 哈希。这样既支持幂等校验，也减少运行列表数据库中的敏感数据复制。
+
+ProviderProfileStore 不接收或保存 API Key 值，只保存 `api_key_env`。`options` 中的 `authorization`、`api_key`、`token`、`secret`、`password` 等字段会被 Schema 拒绝。
+
+## ProviderProfileStore 合同
+
+```text
+initialize()                         初始化表或连接
+upsert(name, profile)                原子新增或替换一个 Profile
+get(name)                            查询单个持久化 Profile
+list()                               按名称稳定排序
+delete(name)                         删除覆盖；不存在时明确报错
+close()                              释放资源
+```
+
+启动时先加载 YAML，再按名称叠加 SQLite Profile，并重建逻辑模型候选与 Agent 路由。`agent_bindings.main` 展开到所有非 assignable 的主协调角色，具体 `worker-*` 绑定只影响对应子 Agent。叠加后的完整 `AppConfig` 必须再次通过模型白名单、能力全等、逻辑模型候选、Agent 引用和 Skill 兼容校验，否则启动失败。管理 API 的写入不会热切换正在使用的 Provider；`PUT`/`DELETE` 返回后需重启，防止进行中的模型调用被关闭或改路由。
 
 ## RunStore 合同
 
@@ -103,9 +120,12 @@ checkpoint:
 run_store:
   backend: memory | sqlite
   path: var/runs.sqlite
+provider_store:
+  backend: memory | sqlite
+  path: var/providers.sqlite
 ```
 
-测试调用 `build_runtime(..., checkpoint_backend="memory")` 时，RunStore 默认同时切换到 memory，防止测试污染本地持久化数据。也可以通过 `run_store_backend` 单独覆盖。
+测试调用 `build_runtime(..., checkpoint_backend="memory")` 时，RunStore 和 ProviderProfileStore 默认同时切换到 memory，防止测试污染本地持久化数据。也可以通过 `run_store_backend`、`provider_store_backend` 单独覆盖。
 
 ## 扩展原则
 

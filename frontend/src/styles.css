@@ -368,6 +368,12 @@ button {
   align-items: center;
 }
 
+.auth-dialog-copy {
+  margin: 0 0 18px;
+  color: var(--text-secondary);
+  line-height: 1.65;
+}
+
 .conversation {
   display: grid;
   place-items: center;
@@ -904,6 +910,172 @@ button {
   gap: 18px;
 }
 
+.provider-settings {
+  display: grid;
+  gap: 14px;
+}
+
+.provider-drawer-title code {
+  text-transform: none;
+}
+
+.provider-toolbar,
+.provider-form-heading,
+.provider-card-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.provider-toolbar > div,
+.provider-form-heading > div,
+.provider-card-heading > div {
+  min-width: 0;
+}
+
+.provider-toolbar strong,
+.provider-toolbar small,
+.provider-form-heading strong,
+.provider-form-heading small,
+.provider-card-heading small {
+  display: block;
+}
+
+.provider-toolbar small,
+.provider-form-heading small,
+.provider-card-heading small,
+.provider-form-section > p,
+.binding-list label > span small {
+  margin-top: 5px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.provider-list,
+.provider-form {
+  display: grid;
+  gap: 12px;
+}
+
+.provider-card,
+.provider-form-section {
+  padding: 18px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+}
+
+.provider-name-row,
+.provider-card-actions,
+.provider-routes,
+.provider-switches {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.provider-name-row strong {
+  font-size: 15px;
+}
+
+.provider-facts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.provider-facts span {
+  min-width: 0;
+  padding: 10px;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: var(--paper-strong);
+  border-radius: 9px;
+}
+
+.provider-facts b {
+  display: block;
+  margin-bottom: 5px;
+  color: var(--ink);
+  font-size: 10px;
+}
+
+.provider-routes {
+  margin-top: 12px;
+}
+
+.provider-form-heading {
+  align-items: center;
+  padding-bottom: 4px;
+}
+
+.provider-form-section h3 {
+  margin: 0 0 14px;
+  font-size: 14px;
+}
+
+.provider-form-section > p {
+  margin: -7px 0 14px;
+}
+
+.provider-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 14px;
+}
+
+.provider-form .el-form-item {
+  margin-bottom: 14px;
+}
+
+.provider-form .el-select,
+.provider-form .el-input-number {
+  width: 100%;
+}
+
+.binding-list {
+  display: grid;
+  gap: 9px;
+}
+
+.binding-list label {
+  display: grid;
+  grid-template-columns: minmax(170px, 0.8fr) minmax(220px, 1.2fr);
+  gap: 14px;
+  align-items: center;
+}
+
+.binding-list label > span strong,
+.binding-list label > span small {
+  display: block;
+}
+
+.binding-list label > span {
+  color: var(--ink);
+  font-size: 12px;
+}
+
+.provider-switches {
+  padding-top: 3px;
+}
+
+.provider-form-actions {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 14px 0 2px;
+  background: var(--el-bg-color);
+}
+
 .detail-section {
   padding: 18px;
   background: var(--paper);
@@ -1113,7 +1285,7 @@ button {
   }
 
   .header-actions .el-tag,
-  .header-actions .el-button:last-child {
+  .header-actions .el-button:first-of-type {
     display: none;
   }
 
@@ -1169,6 +1341,25 @@ button {
 
   .metric-grid {
     grid-template-columns: repeat(2, 1fr);
+  }
+
+  .provider-card-heading,
+  .provider-toolbar {
+    display: grid;
+  }
+
+  .provider-card-actions {
+    justify-content: flex-start;
+  }
+
+  .provider-facts,
+  .provider-form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .binding-list label {
+    grid-template-columns: 1fr;
+    gap: 6px;
   }
 
   .review-item {

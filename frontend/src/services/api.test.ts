@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { harnessApi } from './api'
 
 afterEach(() => {
+  harnessApi.clearApiKey()
   vi.unstubAllGlobals()
 })
 
@@ -70,6 +71,83 @@ describe('harness api client', () => {
     )
   })
 
+  it('sends the deployment API key from session storage', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ status: 'ok' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+    harnessApi.setApiKey('deployment-secret')
+
+    await harnessApi.health()
+
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit
+    expect(new Headers(init.headers).get('X-API-Key')).toBe('deployment-secret')
+    expect(harnessApi.hasApiKey()).toBe(true)
+  })
+
+  it('formats structured validation failures', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            detail: [
+              {
+                loc: ['body', 'config', 'api_key_env'],
+                msg: 'Field required',
+                type: 'missing',
+              },
+            ],
+          }),
+          { status: 422, headers: { 'Content-Type': 'application/json' } },
+        ),
+      ),
+    )
+
+    await expect(
+      harnessApi.saveProvider('team-model', { config: { adapter: 'openai_compatible' } }),
+    ).rejects.toEqual(
+      expect.objectContaining({
+        status: 422,
+        message: 'config.api_key_env：Field required',
+      }),
+    )
+  })
+
+  it('persists a provider profile without sending a credential value', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          provider: { name: 'team-model' },
+          restart_required: true,
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await harnessApi.saveProvider('team-model', {
+      config: {
+        adapter: 'openai_compatible',
+        api_key_env: 'TEAM_MODEL_API_KEY',
+        allowed_models: ['main-model'],
+      },
+      agent_bindings: { main: 'main-model' },
+    })
+
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit
+    const body = JSON.parse(init.body as string)
+    expect(body.config.api_key_env).toBe('TEAM_MODEL_API_KEY')
+    expect(JSON.stringify(body)).not.toContain('sk-')
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/v1/providers/team-model',
+      expect.objectContaining({ method: 'PUT' }),
+    )
+  })
+
   it('streams run snapshots and closes the event source', () => {
     let instance: FakeEventSource | undefined
     class FakeEventSource {
@@ -104,5 +182,34 @@ describe('harness api client', () => {
     )
     stop()
     expect(instance?.closed).toBe(true)
+  })
+
+  it('streams with fetch when API authentication is enabled', async () => {
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(
+          new TextEncoder().encode(
+            'event: run\ndata: {"run_id":"run_2","status":"running"}\n\n',
+          ),
+        )
+        controller.close()
+      },
+    })
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(stream, { status: 200, headers: { 'Content-Type': 'text/event-stream' } }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+    harnessApi.setApiKey('deployment-secret')
+    const onRun = vi.fn()
+
+    const stop = harnessApi.watchRun('run_2', onRun, vi.fn())
+
+    await vi.waitFor(() => expect(onRun).toHaveBeenCalledOnce())
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit
+    expect(new Headers(init.headers).get('X-API-Key')).toBe('deployment-secret')
+    expect(onRun).toHaveBeenCalledWith(
+      expect.objectContaining({ run_id: 'run_2', status: 'running' }),
+    )
+    stop()
   })
 })

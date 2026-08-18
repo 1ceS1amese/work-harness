@@ -10,6 +10,8 @@ build/
 dist/
 *.egg-info/
 var/
+backups/
+deploy/runtime.env
 evaluation/reports/*.json
 !evaluation/reports/.gitkeep
 *:Zone.Identifier

@@ -96,6 +96,10 @@ async def _inspect_compatibility(args: argparse.Namespace) -> int:
                 "providers": runtime.provider_compatibility.model_dump(mode="json"),
                 "provider_adapters": runtime.provider_adapters.adapters,
                 "tool_adapters": runtime.tool_adapters.adapters,
+                "agent_routes": {
+                    name: route.model_dump(mode="json")
+                    for name, route in runtime.config.models.agent_routes.items()
+                },
                 "skills": skills,
             }
         print(json.dumps(payload, ensure_ascii=False, indent=2))
@@ -118,6 +122,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     "persistence": {
                         "checkpoint": config.runtime.checkpoint.backend,
                         "run_store": config.runtime.run_store.backend,
+                        "provider_store": config.runtime.provider_store.backend,
                     },
                 },
                 ensure_ascii=False,

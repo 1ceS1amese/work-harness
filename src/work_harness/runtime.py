@@ -16,6 +16,7 @@ from work_harness.llm.compatibility import (
     inspect_provider_compatibility,
 )
 from work_harness.llm.gateway import ModelGateway
+from work_harness.llm.profiles import apply_provider_profiles
 from work_harness.llm.registry import (
     ProviderAdapterRegistry,
     build_default_provider_registry,
@@ -23,7 +24,12 @@ from work_harness.llm.registry import (
 from work_harness.observability import TraceRecorder, configure_logging
 from work_harness.prompts import PromptRegistry
 from work_harness.skills import SkillRegistry
-from work_harness.storage import RunStore, build_run_store
+from work_harness.storage import (
+    ProviderProfileStore,
+    RunStore,
+    build_provider_profile_store,
+    build_run_store,
+)
 from work_harness.tools.adapters import (
     ToolAdapterRegistry,
     build_default_tool_adapter_registry,
@@ -41,6 +47,7 @@ class HarnessRuntime:
     tool_gateway: ToolGateway
     tool_registry: ToolRegistry
     run_store: RunStore
+    provider_store: ProviderProfileStore
     skill_registry: SkillRegistry
     provider_compatibility: ProviderCompatibilityReport
     provider_adapters: ProviderAdapterRegistry
@@ -63,6 +70,7 @@ def _build_runtime(
     config: AppConfig,
     checkpointer: Any,
     run_store: RunStore,
+    provider_store: ProviderProfileStore,
     provider_adapters: ProviderAdapterRegistry,
     tool_adapters: ToolAdapterRegistry,
 ) -> HarnessRuntime:
@@ -110,6 +118,7 @@ def _build_runtime(
         tool_gateway=tool_gateway,
         tool_registry=registry,
         run_store=run_store,
+        provider_store=provider_store,
         skill_registry=skill_registry,
         provider_compatibility=provider_compatibility,
         provider_adapters=provider_adapters,
@@ -127,11 +136,11 @@ async def build_runtime(
     *,
     checkpoint_backend: str | None = None,
     run_store_backend: str | None = None,
+    provider_store_backend: str | None = None,
     provider_adapters: ProviderAdapterRegistry | None = None,
     tool_adapters: ToolAdapterRegistry | None = None,
 ) -> AsyncIterator[HarnessRuntime]:
     config = load_app_config(project_root)
-    configure_logging(config.runtime.trace.log_level)
     backend = checkpoint_backend or config.runtime.checkpoint.backend
     selected_run_store = run_store_backend
     if selected_run_store is None and checkpoint_backend == "memory":
@@ -141,15 +150,27 @@ async def build_runtime(
         config.project_root,
         backend=selected_run_store,
     )
-    await run_store.initialize()
+    selected_provider_store = provider_store_backend
+    if selected_provider_store is None and checkpoint_backend == "memory":
+        selected_provider_store = "memory"
+    provider_store = build_provider_profile_store(
+        config.runtime.provider_store,
+        config.project_root,
+        backend=selected_provider_store,
+    )
     adapters = provider_adapters or build_default_provider_registry()
     selected_tool_adapters = tool_adapters or build_default_tool_adapter_registry()
     try:
+        await run_store.initialize()
+        await provider_store.initialize()
+        config = apply_provider_profiles(config, await provider_store.list())
+        configure_logging(config.runtime.trace.log_level)
         if backend == "memory":
             runtime = _build_runtime(
                 config,
                 InMemorySaver(),
                 run_store,
+                provider_store,
                 adapters,
                 selected_tool_adapters,
             )
@@ -172,6 +193,7 @@ async def build_runtime(
                 config,
                 saver,
                 run_store,
+                provider_store,
                 adapters,
                 selected_tool_adapters,
             )
@@ -180,4 +202,5 @@ async def build_runtime(
             finally:
                 await _close_providers(runtime)
     finally:
+        await provider_store.close()
         await run_store.close()

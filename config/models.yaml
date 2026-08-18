@@ -13,6 +13,8 @@ providers:
     timeout_seconds: 5
   compatible:
     adapter: openai_compatible
+    protocol_variant: openai
+    api_family: chat_completions
     enabled: false
     base_url_env: MODEL_BASE_URL
     api_key_env: MODEL_API_KEY

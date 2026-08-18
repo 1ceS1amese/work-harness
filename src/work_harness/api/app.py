@@ -8,18 +8,29 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response, status
 from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict
 
+from work_harness.config.models import AppConfig, ProviderConfig
 from work_harness.domain.enums import AgentFunction, RunStatus
 from work_harness.domain.models import RunResult, TaskRequest
+from work_harness.llm.profiles import (
+    apply_provider_profiles,
+    provider_agent_bindings,
+    provider_model_bindings,
+)
 from work_harness.runtime import HarnessRuntime, build_runtime
 from work_harness.service import IdempotencyConflictError, RunManager, RunNotFoundError
 from work_harness.skills import SkillError
+from work_harness.storage import (
+    ProviderProfileRecord,
+    ProviderProfileSpec,
+    ProviderProfileStoreNotFoundError,
+)
 
 
 class ApiModel(BaseModel):
@@ -49,6 +60,27 @@ class RunIndexPage(ApiModel):
     offset: int
 
 
+class ProviderDescriptor(ApiModel):
+    name: str
+    source: Literal["yaml", "persistent", "removed"]
+    config: ProviderConfig
+    model_bindings: dict[str, str]
+    agent_bindings: dict[str, str]
+    loaded: bool
+    endpoint_available: bool | None
+    credential_available: bool | None
+
+
+class ProviderList(ApiModel):
+    items: list[ProviderDescriptor]
+    restart_required: bool
+
+
+class ProviderSaved(ApiModel):
+    provider: ProviderDescriptor
+    restart_required: bool
+
+
 class AppState:
     runtime: HarnessRuntime
     runs: RunManager
@@ -72,8 +104,17 @@ def create_app(project_root: Path | str | None = None) -> FastAPI:
     from work_harness.config.loader import load_app_config
 
     preview = load_app_config(preview_config_root)
+    if preview.api.auth_enabled and not os.getenv(preview.api.api_key_env, ""):
+        raise ValueError(
+            f"API authentication is enabled but {preview.api.api_key_env} is not configured"
+        )
 
-    async def authorize(x_api_key: Annotated[str | None, Header()] = None) -> None:
+    async def authorize(
+        request: Request,
+        x_api_key: Annotated[str | None, Header()] = None,
+    ) -> None:
+        if request.url.path == "/health/live":
+            return
         config = state_holder.runtime.config.api
         if not config.auth_enabled:
             return
@@ -90,6 +131,10 @@ def create_app(project_root: Path | str | None = None) -> FastAPI:
         dependencies=[Depends(authorize)],
     )
 
+    @app.get("/health/live", include_in_schema=False)
+    async def liveness() -> dict[str, str]:
+        return {"status": "ok"}
+
     @app.get("/health")
     async def health() -> dict[str, Any]:
         return {
@@ -97,8 +142,88 @@ def create_app(project_root: Path | str | None = None) -> FastAPI:
             "providers": await state_holder.runtime.model_gateway.health(),
             "checkpoint": state_holder.runtime.config.runtime.checkpoint.backend,
             "run_store": state_holder.runtime.run_store.backend,
+            "provider_store": state_holder.runtime.provider_store.backend,
             "provider_compatible": state_holder.runtime.provider_compatibility.compatible,
         }
+
+    def provider_readiness(config: ProviderConfig) -> tuple[bool | None, bool | None]:
+        if config.adapter != "openai_compatible":
+            return None, None
+        endpoint = bool(
+            (config.base_url_env and os.getenv(config.base_url_env, "").strip())
+            or config.base_url
+        )
+        credential = bool(config.api_key_env and os.getenv(config.api_key_env, ""))
+        return endpoint, credential
+
+    async def provider_state() -> tuple[ProviderList, AppConfig]:
+        profiles = await state_holder.runtime.provider_store.list()
+        profiles_by_name = {item.name: item for item in profiles}
+        persisted_names = {item.name for item in profiles}
+        base = load_app_config(state_holder.runtime.config.project_root)
+        configured = apply_provider_profiles(base, profiles)
+        loaded = state_holder.runtime.config
+        names = sorted(
+            set(configured.models.providers) | set(loaded.models.providers)
+        )
+        items: list[ProviderDescriptor] = []
+        for name in names:
+            is_removed = name not in configured.models.providers
+            selected = (
+                loaded.models.providers[name]
+                if is_removed
+                else configured.models.providers[name]
+            )
+            effective_bindings = provider_model_bindings(
+                loaded if is_removed else configured,
+                name,
+            )
+            selected_bindings = (
+                profiles_by_name[name].model_bindings
+                if name in profiles_by_name
+                else effective_bindings
+            )
+            active_agent_bindings = provider_agent_bindings(
+                loaded if is_removed else configured,
+                name,
+            )
+            selected_agent_bindings = (
+                profiles_by_name[name].agent_bindings
+                if name in profiles_by_name
+                else active_agent_bindings
+            )
+            is_loaded = (
+                name in loaded.models.providers
+                and selected == loaded.models.providers[name]
+                and effective_bindings == provider_model_bindings(loaded, name)
+                and (
+                    not selected.enabled
+                    or active_agent_bindings == provider_agent_bindings(loaded, name)
+                )
+            )
+            endpoint, credential = provider_readiness(selected)
+            items.append(
+                ProviderDescriptor(
+                    name=name,
+                    source=(
+                        "removed"
+                        if is_removed
+                        else "persistent"
+                        if name in persisted_names
+                        else "yaml"
+                    ),
+                    config=selected,
+                    model_bindings=selected_bindings,
+                    agent_bindings=selected_agent_bindings,
+                    loaded=is_loaded,
+                    endpoint_available=endpoint,
+                    credential_available=credential,
+                )
+            )
+        return ProviderList(
+            items=items,
+            restart_required=any(not item.loaded for item in items),
+        ), configured
 
     @app.get("/v1/capabilities")
     async def capabilities() -> dict[str, Any]:
@@ -141,6 +266,13 @@ def create_app(project_root: Path | str | None = None) -> FastAPI:
                     "responsibility": role.responsibility,
                     "specialty": role.specialty,
                     "assignable": role.assignable,
+                    "model_route": (
+                        state_holder.runtime.config.models.agent_routes[name].model_dump(
+                            mode="json"
+                        )
+                        if name in state_holder.runtime.config.models.agent_routes
+                        else None
+                    ),
                 }
                 for name, role in state_holder.runtime.config.agents.agents.items()
                 if role.assignable
@@ -163,11 +295,59 @@ def create_app(project_root: Path | str | None = None) -> FastAPI:
             "providers": state_holder.runtime.provider_compatibility.model_dump(mode="json"),
             "provider_adapters": state_holder.runtime.provider_adapters.adapters,
             "tool_adapters": state_holder.runtime.tool_adapters.adapters,
+            "agent_routes": {
+                name: route.model_dump(mode="json")
+                for name, route in state_holder.runtime.config.models.agent_routes.items()
+            },
             "skills": [
                 item.model_dump(mode="json")
                 for item in state_holder.runtime.skill_registry.descriptors()
             ],
         }
+
+    @app.get("/v1/providers", response_model=ProviderList)
+    async def list_providers() -> ProviderList:
+        result, _ = await provider_state()
+        return result
+
+    @app.put("/v1/providers/{provider_name}", response_model=ProviderSaved)
+    async def save_provider(
+        provider_name: str,
+        profile: ProviderProfileSpec,
+    ) -> ProviderSaved:
+        existing = await state_holder.runtime.provider_store.list()
+        prospective = [item for item in existing if item.name != provider_name]
+        try:
+            prospective.append(
+                ProviderProfileRecord(
+                    name=provider_name,
+                    config=profile.config,
+                    model_bindings=profile.model_bindings,
+                    agent_bindings=profile.agent_bindings,
+                )
+            )
+            base = load_app_config(state_holder.runtime.config.project_root)
+            apply_provider_profiles(base, prospective)
+            await state_holder.runtime.provider_store.upsert(provider_name, profile)
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        result, _ = await provider_state()
+        saved = next(item for item in result.items if item.name == provider_name)
+        return ProviderSaved(provider=saved, restart_required=result.restart_required)
+
+    @app.delete("/v1/providers/{provider_name}", status_code=status.HTTP_204_NO_CONTENT)
+    async def delete_provider(provider_name: str) -> Response:
+        existing = await state_holder.runtime.provider_store.list()
+        prospective = [item for item in existing if item.name != provider_name]
+        try:
+            base = load_app_config(state_holder.runtime.config.project_root)
+            apply_provider_profiles(base, prospective)
+            await state_holder.runtime.provider_store.delete(provider_name)
+        except ProviderProfileStoreNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="provider profile not found") from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     @app.get("/v1/runs", response_model=RunIndexPage)
     async def list_runs(

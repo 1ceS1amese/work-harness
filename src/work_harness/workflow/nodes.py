@@ -241,6 +241,8 @@ class WorkflowNodes:
                         role="assistant",
                         content=response.content,
                         tool_calls=response.tool_calls,
+                        reasoning_content=response.reasoning_content,
+                        response_items=response.response_items,
                     )
                 )
                 for raw_call in response.tool_calls:

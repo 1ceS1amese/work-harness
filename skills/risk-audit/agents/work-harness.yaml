@@ -8,9 +8,7 @@ required_capabilities:
 allowed_tools:
   - workspace_read
 compatible_providers:
-  - mock
-  - mock-secondary
-  - compatible
+  - "*"
 preferred_providers:
   - mock-secondary
   - mock

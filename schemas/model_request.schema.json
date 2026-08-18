@@ -48,6 +48,34 @@
           ],
           "default": null,
           "title": "Tool Calls"
+        },
+        "reasoning_content": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reasoning Content"
+        },
+        "response_items": {
+          "anyOf": [
+            {
+              "items": {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Response Items"
         }
       },
       "required": [

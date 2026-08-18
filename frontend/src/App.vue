@@ -1,6 +1,15 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
-import { Connection, EditPen, MoreFilled, Refresh } from '@element-plus/icons-vue'
+import {
+  computed,
+  defineAsyncComponent,
+  nextTick,
+  onBeforeUnmount,
+  onMounted,
+  reactive,
+  ref,
+  watch,
+} from 'vue'
+import { Connection, EditPen, Lock, Refresh, Setting } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 
 import ChatSidebar from './components/ChatSidebar.vue'
@@ -23,6 +32,10 @@ import type {
 } from './types'
 import { ACTIVE_RUN_STATUSES, resultMessage } from './utils/run'
 
+const ProviderSettingsDrawer = defineAsyncComponent(
+  () => import('./components/ProviderSettingsDrawer.vue'),
+)
+
 const {
   conversations,
   activeId,
@@ -42,10 +55,22 @@ const prompt = ref('')
 const sending = ref(false)
 const mobileMenuOpen = ref(false)
 const detailsOpen = ref(false)
+const providerSettingsOpen = ref(false)
+const authDialogOpen = ref(false)
+const apiKeyInput = ref('')
+const apiKeyConfigured = ref(harnessApi.hasApiKey())
+const authenticating = ref(false)
 const selectedRunId = ref<string | null>(null)
 const actionBusyRunId = ref<string | null>(null)
 const backendState = ref<'checking' | 'online' | 'offline' | 'auth'>('checking')
 const taskTypes = ref(['general', 'planning', 'decision', 'research', 'code'])
+const logicalModels = ref([
+  'planner-strong',
+  'worker-fast',
+  'reviewer-independent',
+  'judge-stable',
+  'synthesizer-general',
+])
 const skills = ref<SkillDescriptor[]>([])
 const agentFunctions = ref<AgentFunctionDescriptor[]>([
   { id: 'analysis', display_name: '分析', description: '梳理需求与比较方案' },
@@ -60,6 +85,7 @@ const agents = ref<AgentDescriptor[]>([
     responsibility: '按本轮功能执行子任务',
     specialty: '按任务选择功能',
     assignable: true,
+    model_route: null,
   },
   {
     id: 'worker-02',
@@ -67,6 +93,7 @@ const agents = ref<AgentDescriptor[]>([
     responsibility: '按本轮功能执行子任务',
     specialty: '按任务选择功能',
     assignable: true,
+    model_route: null,
   },
   {
     id: 'worker-03',
@@ -74,6 +101,7 @@ const agents = ref<AgentDescriptor[]>([
     responsibility: '按本轮功能执行子任务',
     specialty: '按任务选择功能',
     assignable: true,
+    model_route: null,
   },
   {
     id: 'worker-04',
@@ -81,6 +109,7 @@ const agents = ref<AgentDescriptor[]>([
     responsibility: '按本轮功能执行子任务',
     specialty: '按任务选择功能',
     assignable: true,
+    model_route: null,
   },
 ])
 const conversationPane = ref<HTMLElement | null>(null)
@@ -289,7 +318,7 @@ async function pollRun(runId: string): Promise<void> {
   }
 }
 
-async function checkConnection(): Promise<void> {
+async function checkConnection(): Promise<boolean> {
   backendState.value = 'checking'
   try {
     const [, capabilities] = await Promise.all([
@@ -298,13 +327,52 @@ async function checkConnection(): Promise<void> {
     ])
     backendState.value = 'online'
     if (capabilities.task_types.length > 0) taskTypes.value = capabilities.task_types
+    if (capabilities.logical_models.length > 0) logicalModels.value = capabilities.logical_models
     if (capabilities.functions?.length > 0) agentFunctions.value = capabilities.functions
     if (capabilities.agents.length > 0) agents.value = capabilities.agents
     skills.value = capabilities.skills ?? []
+    return true
   } catch (error) {
-    if (lifecycleController.signal.aborted) return
+    if (lifecycleController.signal.aborted) return false
     backendState.value = error instanceof ApiError && error.status === 401 ? 'auth' : 'offline'
+    if (backendState.value === 'auth') authDialogOpen.value = true
+    return false
   }
+}
+
+function openAuthDialog(): void {
+  apiKeyInput.value = ''
+  authDialogOpen.value = true
+}
+
+async function submitApiKey(): Promise<void> {
+  const value = apiKeyInput.value.trim()
+  if (!value) {
+    ElMessage.warning('请输入部署 API Key')
+    return
+  }
+  authenticating.value = true
+  harnessApi.setApiKey(value)
+  apiKeyConfigured.value = true
+  const connected = await checkConnection()
+  authenticating.value = false
+  if (connected) {
+    apiKeyInput.value = ''
+    authDialogOpen.value = false
+    ElMessage.success('身份验证成功')
+    return
+  }
+  harnessApi.clearApiKey()
+  apiKeyConfigured.value = false
+  if (backendState.value === 'auth') ElMessage.error('API Key 无效')
+}
+
+function clearApiKey(): void {
+  harnessApi.clearApiKey()
+  apiKeyConfigured.value = false
+  apiKeyInput.value = ''
+  for (const runId of runStreams.keys()) stopStreaming(runId)
+  void checkConnection()
 }
 
 async function refreshActiveConversation(): Promise<void> {
@@ -514,7 +582,19 @@ onBeforeUnmount(() => {
         aria-label="刷新运行状态"
         @click="refreshActiveConversation"
       />
-      <el-button circle :icon="MoreFilled" aria-label="更多操作" />
+      <el-button
+        circle
+        :icon="Setting"
+        aria-label="Provider 与模型路由"
+        @click="providerSettingsOpen = true"
+      />
+      <el-button
+        v-if="backendState === 'auth' || apiKeyConfigured"
+        circle
+        :icon="Lock"
+        aria-label="部署 API 身份验证"
+        @click="openAuthDialog"
+      />
     </template>
 
     <template #conversation>
@@ -579,6 +659,37 @@ onBeforeUnmount(() => {
 
     <template #overlay>
       <RunDetailsDrawer v-model="detailsOpen" :run="selectedRun" :agents="agents" />
+      <ProviderSettingsDrawer
+        v-model="providerSettingsOpen"
+        :logical-models="logicalModels"
+        :agents="agents"
+        @changed="checkConnection"
+      />
+      <el-dialog
+        v-model="authDialogOpen"
+        title="部署 API 身份验证"
+        width="min(430px, calc(100vw - 32px))"
+        :close-on-click-modal="backendState !== 'auth'"
+      >
+        <p class="auth-dialog-copy">
+          输入部署环境的 WORK_HARNESS_API_KEY。密钥只保存在当前浏览器标签页的
+          sessionStorage，不会写入 Provider 配置。
+        </p>
+        <el-input
+          v-model="apiKeyInput"
+          type="password"
+          show-password
+          autocomplete="current-password"
+          placeholder="部署 API Key"
+          @keyup.enter="submitApiKey"
+        />
+        <template #footer>
+          <el-button v-if="apiKeyConfigured" @click="clearApiKey">清除密钥</el-button>
+          <el-button type="primary" :loading="authenticating" @click="submitApiKey">
+            验证并连接
+          </el-button>
+        </template>
+      </el-dialog>
     </template>
   </GroupChatLayout>
 </template>

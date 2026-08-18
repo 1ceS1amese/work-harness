@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any, Literal
+from urllib.parse import parse_qsl, urlparse
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from work_harness.domain.enums import RiskLevel, ToolCategory
 
@@ -20,6 +21,11 @@ class CheckpointConfig(ConfigModel):
 class RunStoreConfig(ConfigModel):
     backend: Literal["memory", "sqlite"] = "sqlite"
     path: str = "var/runs.sqlite"
+
+
+class ProviderStoreConfig(ConfigModel):
+    backend: Literal["memory", "sqlite"] = "sqlite"
+    path: str = "var/providers.sqlite"
 
 
 class TraceConfig(ConfigModel):
@@ -49,6 +55,7 @@ class RuntimeConfig(ConfigModel):
     recovery_scan_limit: int = Field(default=200, ge=1, le=10_000)
     checkpoint: CheckpointConfig = Field(default_factory=CheckpointConfig)
     run_store: RunStoreConfig = Field(default_factory=RunStoreConfig)
+    provider_store: ProviderStoreConfig = Field(default_factory=ProviderStoreConfig)
     trace: TraceConfig = Field(default_factory=TraceConfig)
 
     @model_validator(mode="after")
@@ -60,9 +67,15 @@ class RuntimeConfig(ConfigModel):
 
 class ProviderConfig(ConfigModel):
     adapter: str = Field(pattern=r"^[a-z][a-z0-9_]{1,63}$")
+    protocol_variant: Literal["openai", "deepseek"] = "openai"
+    api_family: Literal["chat_completions", "responses"] = "chat_completions"
+    structured_output_mode: Literal["json_schema", "json_object"] | None = None
+    chat_token_parameter: Literal["max_completion_tokens", "max_tokens"] | None = None
+    store_responses: bool = False
     enabled: bool = True
-    base_url_env: str | None = None
-    api_key_env: str | None = None
+    base_url: str | None = None
+    base_url_env: str | None = Field(default=None, pattern=r"^[A-Za-z_][A-Za-z0-9_]*$")
+    api_key_env: str | None = Field(default=None, pattern=r"^[A-Za-z_][A-Za-z0-9_]*$")
     allowed_models: list[str] = Field(default_factory=list)
     capabilities: set[str] = Field(default_factory=set)
     timeout_seconds: float = Field(default=60, gt=0)
@@ -70,13 +83,56 @@ class ProviderConfig(ConfigModel):
     allow_private_network: bool = False
     options: dict[str, Any] = Field(default_factory=dict)
 
+    @field_validator("base_url")
+    @classmethod
+    def reject_credentials_in_base_url(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        parsed = urlparse(value)
+        if parsed.username or parsed.password:
+            raise ValueError("provider base_url cannot contain credentials")
+        for key, _ in parse_qsl(parsed.query, keep_blank_values=True):
+            normalized = key.strip().lower().replace("-", "_")
+            if normalized == "authorization" or normalized.endswith(
+                ("api_key", "token", "secret", "password")
+            ):
+                raise ValueError("provider base_url cannot contain credential query fields")
+        return value
+
+    @field_validator("options")
+    @classmethod
+    def reject_embedded_secrets(cls, value: dict[str, Any]) -> dict[str, Any]:
+        sensitive_suffixes = ("api_key", "token", "secret", "password")
+
+        def inspect(item: Any) -> None:
+            if isinstance(item, dict):
+                for key, nested in item.items():
+                    normalized = str(key).strip().lower().replace("-", "_")
+                    if normalized == "authorization" or normalized.endswith(
+                        sensitive_suffixes
+                    ):
+                        raise ValueError(
+                            "provider options cannot contain credentials; use api_key_env"
+                        )
+                    inspect(nested)
+            elif isinstance(item, list):
+                for nested in item:
+                    inspect(nested)
+
+        inspect(value)
+        return value
+
     @model_validator(mode="after")
     def validate_provider_contract(self) -> ProviderConfig:
         if self.adapter == "openai_compatible" and self.enabled:
-            if not self.base_url_env or not self.api_key_env or not self.allowed_models:
+            if (
+                not (self.base_url or self.base_url_env)
+                or not self.api_key_env
+                or not self.allowed_models
+            ):
                 raise ValueError(
-                    "enabled openai_compatible provider requires base_url_env, "
-                    "api_key_env, and allowed_models"
+                    "enabled openai_compatible provider requires base_url or "
+                    "base_url_env, api_key_env, and allowed_models"
                 )
         return self
 
@@ -106,6 +162,7 @@ class ModelsConfig(ConfigModel):
     profile: str = "local"
     providers: dict[str, ProviderConfig]
     logical_models: dict[str, LogicalModelConfig]
+    agent_routes: dict[str, ModelCandidateConfig] = Field(default_factory=dict)
     compatibility: ProviderCompatibilityConfig = Field(default_factory=ProviderCompatibilityConfig)
 
 
@@ -266,6 +323,32 @@ class AppConfig(ConfigModel):
                     )
             if enabled_candidates == 0:
                 raise ValueError(f"logical model {logical_name} has no enabled candidates")
+
+        for agent_name, route in self.models.agent_routes.items():
+            role = self.agents.agents.get(agent_name)
+            if role is None:
+                raise ValueError(f"agent route references unknown agent {agent_name}")
+            provider = providers.get(route.provider)
+            if provider is None:
+                raise ValueError(
+                    f"agent route {agent_name} references unknown provider {route.provider}"
+                )
+            if not provider.enabled:
+                raise ValueError(
+                    f"agent route {agent_name} references disabled provider {route.provider}"
+                )
+            if provider.allowed_models and route.model not in provider.allowed_models:
+                raise ValueError(
+                    f"agent route {agent_name} model {route.model} is not allowlisted "
+                    f"for provider {route.provider}"
+                )
+            logical = logical_models[role.logical_model]
+            missing = logical.required_capabilities - provider.capabilities
+            if missing:
+                raise ValueError(
+                    f"agent route {agent_name} provider {route.provider} lacks "
+                    f"capabilities: {sorted(missing)}"
+                )
 
         if self.models.profile == "production":
             enabled_mock = any(

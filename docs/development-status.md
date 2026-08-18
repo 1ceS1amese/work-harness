@@ -2,11 +2,11 @@
 
 > 报告日期：2026-08-18  
 > 项目目录：`/home/s1amese/work-harness`  
-> 当前阶段：本地框架闭环、Provider 兼容合同与模块化 Skill 组装已完成；真实模型验收、业务系统工具和生产基础设施待接入
+> 当前阶段：本地框架闭环、Provider 兼容合同、模块化 Skill、单实例容器部署与 GitHub 开源发布链已完成；真实模型验收、业务系统工具和多实例生产基础设施待接入
 
 ## 1. 结论摘要
 
-Work Harness 已经具备一套可运行、可测试、可持久化的多 Agent 编排框架：后端可接收任务并执行完整工作流，四个同构中文 Agent 可以进行任务分配、受限只读工具调用、交叉审查、裁决、修复和汇总；所有启用 Provider 必须通过同一协议、相同能力集合和真实能力声明检查；任务能力可通过 Skill 模块化组合，并自动或手动路由到兼容 Provider。前端采用 Vue 3、TypeScript 和 Element Plus 实现类群聊式交互，并以 SSE 优先、查询补偿的方式展示状态；运行状态、幂等索引、执行租约和浏览器会话均有持久化方案。
+Work Harness 已经具备一套可运行、可测试、可持久化的多 Agent 编排框架：后端可接收任务并执行完整工作流，四个同构中文 Agent 可以进行任务分配、受限只读工具调用、交叉审查、裁决、修复和汇总；所有启用 Provider 必须通过同一协议、相同能力集合和真实能力声明检查；任务能力可通过 Skill 模块化组合，并自动或手动路由到兼容 Provider。Provider 的非敏感配置、逻辑模型映射及主协调组/逐子 Agent 路由可通过 SQLite Profile 保存；自定义模型方可选择 OpenAI 协议或 DeepSeek 方言，以及 Chat Completions/Responses 出站端点。前端采用 Vue 3、TypeScript 和 Element Plus 实现类群聊式交互，并以 SSE 优先、查询补偿的方式展示状态；运行状态、幂等索引、执行租约、Provider Profile 和浏览器会话均有持久化方案。
 
 当前可以用于：
 
@@ -15,6 +15,7 @@ Work Harness 已经具备一套可运行、可测试、可持久化的多 Agent 
 - API、前端和持久化联调；
 - Mock 模型下的回归测试和评估流程验证；
 - 在虚拟机中继续开发。
+- 以 GitHub Issue/PR 协作，并通过 GitHub Release 与 GHCR 发布版本化产物。
 
 当前还不能直接视为生产系统。以下能力尚未完成真实接入：
 
@@ -97,22 +98,25 @@ Normalize
 | 任务分派与依赖 | 已完成 | Planner 生成结构化子任务，支持功能、依赖和并发执行 |
 | Agent 交叉审查 | 已完成 | Reviewer、Judge 节点已进入主流程 |
 | 结构化数据契约 | 已完成 | 主要输入输出由 Pydantic 模型约束 |
-| 模型调用抽象 | 框架完成，待真实验收 | Mock 可运行；OpenAI-compatible 已有生产 Profile、协议错误映射和契约测试 |
+| 模型调用抽象 | 框架完成，待真实验收 | 自定义 OpenAI 协议/DeepSeek 方言支持 Chat Completions/Responses、结构化输出与 Tool Call 转换；无凭据实测 |
 | Provider 能力全等 | 已完成 | 启动时校验协议版本、基线能力、启用 Provider 能力集合全等及运行时真实声明 |
 | Provider/Tool 插件组装 | 已完成 | 内置注册表加 `work_harness.providers`、`work_harness.tools` 入口点扩展 |
+| Provider Profile 持久化 | 已完成 | YAML 默认值叠加 Memory/SQLite；支持 main/逐 worker 路由，API 和前端管理抽屉可保存/查询/删除，密钥值不落库 |
 | 模块化 Skill | 已完成 | 标准 `SKILL.md` 加机器清单，支持能力/工具校验、组合、首选和手动 Provider 路由 |
 | 工具注册与网关 | 已完成只读闭环 | 已打通模型 tool call；除 `echo_read` 外新增受限 `workspace_read` |
 | Graph Checkpoint | 已完成 | 支持 Memory/SQLite，默认 SQLite |
 | RunStore | 已完成 | 支持 Memory/SQLite，默认 SQLite，保存运行索引、状态与幂等信息 |
 | 浏览器会话持久化 | 已完成 | `localStorage` 保存会话；仅限当前浏览器 |
 | 服务端会话同步 | 未完成 | 尚无账号级会话仓储和多端同步 |
-| Vue 群聊式前端 | 已完成 | 创建任务、Skill/Provider 选择、状态流、恢复/取消、详情和会话本地保存 |
+| Vue 群聊式前端 | 已完成 | 创建任务、Skill/Provider 选择、Provider 配置与路由管理、状态流、恢复/取消、详情和会话本地保存 |
 | 异常运行恢复 | 已完成单实例闭环 | RunStore 租约、心跳、启动扫描；只从已有 Checkpoint 续跑 |
 | 实时流式推送 | 已完成状态流 | SSE 发送运行快照，前端断线后使用查询接口补偿 |
-| 自动化测试 | 已完成扩展集 | 后端 41 项、前端 8 项通过 |
+| 自动化测试 | 已完成扩展集 | 后端 56 项、前端 13 项通过 |
 | 评估框架 | 已完成扩展集 | 10 个 Mock 契约用例通过，不代表真实任务质量 |
 | 身份、租户、限流 | 未完成 | 只具备本地/API 鉴权配置边界，不是完整生产安全方案 |
 | 多实例与任务队列 | 未完成 | 当前 SQLite/进程内并发适合单实例开发环境 |
+| Docker Compose 单实例部署 | 已实现，待目标机实构建 | 多阶段镜像、非 root/只读运行、持久化卷、健康检查、在线备份、日志轮转及可选 Caddy HTTPS；Compose 静态校验通过 |
+| GitHub 开源发布链 | 已完成 | Standard Readme 中英文入口、MIT、社区治理文件、Issue/PR 模板、Dependabot、CI、Release wheel/sdist、双架构 GHCR 与构建来源证明 |
 | Git 版本基线 | 已完成 | `main` 分支已有可回滚基线提交，本轮兼容性改造可独立审查 |
 
 ## 5. 多 Agent 编排当前实现
@@ -166,12 +170,13 @@ Planner 当前可为子任务提供：
 
 ## 6. 持久化设计与当前边界
 
-系统目前有三个不同职责的持久化层：
+系统目前有四个不同职责的持久化层：
 
 | 层 | 默认位置 | 保存内容 | 当前定位 |
 | --- | --- | --- | --- |
 | Checkpoint | `var/checkpoints.sqlite` | 完整 Graph State、节点进度、恢复所需状态 | 运行状态的事实来源 |
 | RunStore | `var/runs.sqlite` | 运行索引、状态、请求指纹、幂等哈希、租约与尝试次数 | 快速查询、幂等和唯一执行权 |
+| ProviderProfileStore | `var/providers.sqlite` | Adapter、协议变体、端点、密钥环境变量名、模型白名单、逻辑映射与逐 Agent 路由 | Provider 配置重启恢复，不保存 Key 值 |
 | ConversationStorage | 浏览器 `localStorage` | 会话列表、消息、最近运行信息 | 单浏览器交互体验 |
 
 后端存储通过接口封装，可在配置中选择 Memory 或 SQLite：
@@ -179,6 +184,8 @@ Planner 当前可为子任务提供：
 - `src/work_harness/storage/base.py`：`RunStore` 协议；
 - `src/work_harness/storage/memory.py`：内存实现；
 - `src/work_harness/storage/sqlite.py`：SQLite 实现；
+- `src/work_harness/storage/provider_base.py`：`ProviderProfileStore` 协议；
+- `src/work_harness/storage/provider_memory.py`、`provider_sqlite.py`：Provider Profile 实现；
 - `src/work_harness/config/models.py`：存储配置模型。
 
 SQLite 实现已经包含 WAL、busy timeout、参数绑定、进程内异步写锁、数据库唯一索引和条件租约更新。查询完整结果时以 Checkpoint 为准，并将状态同步到 RunStore。旧 Checkpoint 如果缺少运行索引，会在首次查询时补建索引。
@@ -198,9 +205,13 @@ SQLite 实现已经包含 WAL、busy timeout、参数绑定、进程内异步写
 
 | 方法 | 路径 | 用途 |
 | --- | --- | --- |
+| GET | `/health/live` | 无鉴权的容器存活探针 |
 | GET | `/health` | 服务健康检查 |
 | GET | `/v1/capabilities` | 返回 Agent、模型、工具等可用能力 |
 | GET | `/v1/compatibility` | 返回 Provider 合同、Adapter 和 Skill 兼容性报告 |
+| GET | `/v1/providers` | 查询 YAML 与持久化 Provider Profile、装载和凭据就绪状态 |
+| PUT | `/v1/providers/{name}` | 校验并持久化 Provider Profile，重启后装载 |
+| DELETE | `/v1/providers/{name}` | 删除持久化覆盖，重启后回退 YAML |
 | POST | `/v1/runs` | 创建一次运行 |
 | GET | `/v1/runs` | 分页列出运行 |
 | GET | `/v1/runs/{run_id}` | 查询运行详情和结果 |
@@ -224,6 +235,7 @@ SQLite 实现已经包含 WAL、busy timeout、参数绑定、进程内异步写
 | `frontend/src/components/MessageBubble.vue` | 用户、系统和 Agent 消息展示 |
 | `frontend/src/components/ComposerBox.vue` | 任务输入与发送 |
 | `frontend/src/components/RunDetailsDrawer.vue` | 运行详情、步骤和状态查看 |
+| `frontend/src/components/ProviderSettingsDrawer.vue` | Provider Profile、协议类型、模型映射和逐 Agent 路由管理 |
 | `frontend/src/composables/useConversations.ts` | 会话状态和交互逻辑 |
 | `frontend/src/services/conversationStorage.ts` | 浏览器本地持久化封装 |
 | `frontend/src/services/api.ts` | 后端 API 封装 |
@@ -237,6 +249,7 @@ SQLite 实现已经包含 WAL、busy timeout、参数绑定、进程内异步写
 - 刷新页面后恢复本地会话；
 - 调用后端能力和运行接口；
 - 为每个会话选择一个或多个 Skill，并自动选择或手动固定可用 Provider；
+- 在界面中暂存或启用自定义 Provider，编辑主协调组/逐子 Agent 模型路由，并查看待重启和就绪状态；
 - SSE 实时更新，断线后自动回退到查询轮询。
 
 后续前端开发重点不应是重做视觉层，而应是：服务端会话同步、身份隔离、真实写工具审批和生产错误提示。
@@ -245,7 +258,7 @@ SQLite 实现已经包含 WAL、busy timeout、参数绑定、进程内异步写
 
 ### 9.1 模型
 
-模型层的接口和路由框架已经完成，默认使用两个能力完全相同的 Mock Provider 验证 Provider 选择。所有启用 Provider 需要通过协议 `1.0`、基线能力、能力集合全等和配置/运行时声明一致检查。OpenAI-compatible Provider 已补齐生产 Profile、请求/响应契约测试、结构化输出解析和 HTTP/传输错误映射，但尚未配置真实凭据和模型，也没有真实任务质量基线。
+模型层的接口和路由框架已经完成，默认使用两个能力完全相同的 Mock Provider 验证 Provider 选择。所有启用 Provider 需要通过协议 `1.0`、基线能力、能力集合全等和配置/运行时声明一致检查。`openai_compatible` 表示协议 Adapter，而非 OpenAI 官方服务；自定义 Profile 可选择 `openai` 协议或 `deepseek` 方言，以及 `/v1/chat/completions`、`/v1/responses` 端点。`agent_bindings.main` 绑定所有主协调节点，具体 `worker-*` 可各自覆盖 Provider/模型。当前已覆盖消息、结构化输出、Token 参数、Tool Call 多轮状态、Usage、逐 Agent 路由和错误映射的 Mock 合同测试，但仍未配置真实凭据和模型，也没有真实任务质量基线。
 
 当前逻辑模型角色包括：
 
@@ -282,13 +295,18 @@ Prompt 应继续通过集中配置或注册机制管理，并记录版本。任�
 | 验证项 | 命令 | 结果 |
 | --- | --- | --- |
 | 配置检查 | `uv run work-harness check-config` | 通过；本地配置、Agent、模型角色、工具和 SQLite 存储加载正常 |
-| Python 静态检查 | `uv run ruff check src tests` | 通过，无检查错误 |
+| Python 静态检查 | `uv run ruff check src tests scripts` | 通过，无检查错误 |
 | Provider/Skill 兼容检查 | `uv run work-harness check-compatibility` | 通过；2 个启用 Provider 等能力，2 个运行时 Skill 均有可用 Provider |
-| 后端测试 | `uv run pytest` | 41 项通过，包含 Provider 全等、Adapter、Skill 组合和指定 Provider 路由 |
-| 基础评估 | `uv run work-harness eval` | 10/10 契约检查通过，错误率 0，平均延迟约 30.1 ms |
+| 后端测试 | `uv run pytest` | 56 项通过，包含包内运行资源、无密钥值暂存、Provider 持久化、双协议、多轮 Tool Call、逐 Agent 路由、部署鉴权、能力全等和 Skill 组合 |
+| 基础评估 | `uv run work-harness eval` | 10/10 契约检查通过，错误率 0，平均延迟约 17.4 ms |
 | 前端类型检查 | `npm run type-check` | 通过 |
-| 前端测试 | `npm run test -- --run` | 4 个测试文件、8 项测试全部通过 |
-| 前端生产构建 | `npm run build` | 通过；CSS 约 126.78 kB，JS 约 436.84 kB |
+| 前端测试 | `npm run test -- --run` | 5 个测试文件、13 项测试全部通过，包含 API Key 请求头与鉴权 SSE |
+| 前端生产构建 | `npm run build` | 通过；主 CSS/JS 约 132.43/455.37 kB，Provider 管理按需加载约 11.61/49.69 kB |
+| 开源发布自检 | `python scripts/check_release.py` | 通过；README 顺序、描述、版本、License、本地链接和社区文件一致 |
+| GitHub Actions 校验 | `actionlint` | 通过；CI 与 Release 工作流语法、表达式和依赖关系有效 |
+| Python 发布产物 | `python -m build`、`twine check`、`scripts/verify_wheel.py` | sdist 与 wheel 构建及元数据检查通过；wheel 在全新虚拟环境、源码目录外可加载包内配置并执行 CLI |
+| Compose 静态检查 | `docker compose --profile public config --quiet` | 文件此前通过静态校验；本轮 WSL 未启用 Docker Desktop 集成，镜像实构建交由 GitHub CI 和目标机执行 |
+| SQLite 备份检查 | `python scripts/backup_sqlite.py var <临时目录>` | 通过；三个数据库快照与 manifest SHA-256 一致 |
 
 基础评估当前只验证 Mock 工作流能否稳定闭环：
 
@@ -297,8 +315,8 @@ case_count: 10
 success_rate: 1.0
 error_rate: 0.0
 bad_case_count: 0
-average_latency_ms: 30.1
-p95_latency_ms: 35.0
+average_latency_ms: 18.3
+p95_latency_ms: 21.0
 structured_parse_error_rate: 0.0
 average_steps_proxy: 10.8
 total_estimated_cost_usd: 0.0
@@ -315,9 +333,10 @@ quality_claim: false
 **现状：** 已初始化 Git，默认分支为 `main`；`.gitignore` 排除 `.env`、SQLite 运行文件、依赖目录、构建产物和 Windows Zone.Identifier。  
 **验证：** 基线提交包含源码、配置模板、测试和文档，不包含数据库运行文件、依赖目录和密钥。
 
-### P1：真实模型接入与真实评估缺失
+### P1（协议与持久化已完成）：真实模型接入与真实评估缺失
 
 **位置：** `src/work_harness/llm/`、`config/models.yaml`、`evaluation/`。
+**现状：** OpenAI 协议/DeepSeek 方言、Chat Completions/Responses 和 Provider Profile 已完成 Mock 合同；用户选择不在本轮配置密钥，真实调用留待手动测试。
 **影响：** 目前无法判断多 Agent 编排的实际答案质量、成本、延迟和稳定性。  
 **建议：** 接入一个 OpenAI-compatible 测试模型，建立 10–20 条人工标注的最小真实评估集，再调整 Prompt、并发和修复策略。  
 **风险：** 真实模型输出、速率限制、结构化响应兼容性和成本可能暴露新问题。
@@ -374,7 +393,7 @@ quality_claim: false
 4. 运行配置检查、后端测试、前端测试和构建。
 5. 初始化 Git，提交当前基线。
 
-完成标准：后端 41 项测试和前端 8 项测试通过，10/10 Mock 契约评估通过，生产构建成功，Git 工作区干净。
+完成标准：后端 56 项测试和前端 13 项测试通过，10/10 Mock 契约评估通过，生产构建成功，Git 工作区干净。
 
 ### 阶段 1：接入一个真实模型并建立质量基线
 

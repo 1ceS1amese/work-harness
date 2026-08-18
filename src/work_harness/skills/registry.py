@@ -118,15 +118,25 @@ class SkillRegistry:
                         f"roles: {sorted(missing_roles)}"
                     )
             candidates = {candidate.provider for candidate in logical.candidates}
-            unknown_providers = set(manifest.compatible_providers) - set(models.providers)
+            wildcard = "*" in manifest.compatible_providers
+            unknown_providers = (
+                set()
+                if wildcard
+                else set(manifest.compatible_providers) - set(models.providers)
+            )
             if unknown_providers:
                 raise SkillCompatibilityError(
                     f"skill {skill.skill_id} references unknown providers: "
                     f"{sorted(unknown_providers)}"
                 )
             eligible = []
-            for provider_name in manifest.compatible_providers:
+            provider_names = (
+                list(models.providers) if wildcard else manifest.compatible_providers
+            )
+            for provider_name in provider_names:
                 provider = models.providers[provider_name]
+                if wildcard and not provider.enabled:
+                    continue
                 missing = manifest.required_capabilities - provider.capabilities
                 if missing:
                     raise SkillCompatibilityError(
@@ -292,9 +302,14 @@ class SkillRegistry:
             raise RuntimeError("skill compatibility has not been validated")
         logical = self._models.logical_models[skill.manifest.logical_model]
         candidate_providers = {candidate.provider for candidate in logical.candidates}
+        provider_names = (
+            list(self._models.providers)
+            if "*" in skill.manifest.compatible_providers
+            else skill.manifest.compatible_providers
+        )
         return [
             provider_name
-            for provider_name in skill.manifest.compatible_providers
+            for provider_name in provider_names
             if provider_name in candidate_providers
             and self._models.providers[provider_name].enabled
             and skill.manifest.required_capabilities

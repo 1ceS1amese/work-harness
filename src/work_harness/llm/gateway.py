@@ -34,7 +34,15 @@ class ModelGateway:
         last_error: Exception | None = None
         fallback_from: str | None = None
         required_capabilities = request.required_capabilities | logical.required_capabilities
-        candidate_providers = {candidate.provider for candidate in logical.candidates}
+        agent_route = self._config.agent_routes.get(request.agent_role)
+        configured_candidates = list(logical.candidates)
+        if agent_route is not None:
+            configured_candidates = [agent_route] + [
+                candidate
+                for candidate in configured_candidates
+                if candidate != agent_route
+            ]
+        candidate_providers = {candidate.provider for candidate in configured_candidates}
         unknown_allowlist = request.provider_allowlist - candidate_providers
         if unknown_allowlist:
             raise ModelGatewayError(
@@ -50,7 +58,7 @@ class ModelGateway:
 
         candidates = [
             candidate
-            for candidate in logical.candidates
+            for candidate in configured_candidates
             if not request.provider_allowlist or candidate.provider in request.provider_allowlist
         ]
         preference_order = {
@@ -59,6 +67,7 @@ class ModelGateway:
         candidates = sorted(
             enumerate(candidates),
             key=lambda item: (
+                0 if agent_route is not None and item[1] == agent_route else 1,
                 preference_order.get(item[1].provider, len(preference_order)),
                 item[0],
             ),

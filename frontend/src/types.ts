@@ -182,18 +182,70 @@ export interface HealthResponse {
   providers: Record<string, unknown>
   checkpoint: string
   run_store: string
+  provider_store: string
   provider_compatible: boolean
 }
 
 export interface ProviderCompatibilityItem {
   provider: string
   adapter: string
+  protocol_variant: 'openai' | 'deepseek'
+  api_family: 'chat_completions' | 'responses'
   protocol_version: string
   capabilities: string[]
   configured_capabilities: string[]
   baseline_capabilities: string[]
   compatible: boolean
   issues: string[]
+}
+
+export type ProviderProtocolVariant = 'openai' | 'deepseek'
+export type ProviderApiFamily = 'chat_completions' | 'responses'
+
+export interface ProviderConfig {
+  adapter: string
+  protocol_variant: ProviderProtocolVariant
+  api_family: ProviderApiFamily
+  structured_output_mode: 'json_schema' | 'json_object' | null
+  chat_token_parameter: 'max_completion_tokens' | 'max_tokens' | null
+  store_responses: boolean
+  enabled: boolean
+  base_url: string | null
+  base_url_env: string | null
+  api_key_env: string | null
+  allowed_models: string[]
+  capabilities: string[]
+  timeout_seconds: number
+  allow_insecure_http: boolean
+  allow_private_network: boolean
+  options: Record<string, unknown>
+}
+
+export interface ProviderProfileSpec {
+  config: Pick<ProviderConfig, 'adapter'> & Partial<Omit<ProviderConfig, 'adapter'>>
+  model_bindings?: Record<string, string>
+  agent_bindings?: Record<string, string>
+}
+
+export interface ProviderDescriptor {
+  name: string
+  source: 'yaml' | 'persistent' | 'removed'
+  config: ProviderConfig
+  model_bindings: Record<string, string>
+  agent_bindings: Record<string, string>
+  loaded: boolean
+  endpoint_available: boolean | null
+  credential_available: boolean | null
+}
+
+export interface ProviderList {
+  items: ProviderDescriptor[]
+  restart_required: boolean
+}
+
+export interface ProviderSaved {
+  provider: ProviderDescriptor
+  restart_required: boolean
 }
 
 export interface ProviderContractDescriptor {
@@ -241,6 +293,7 @@ export interface AgentDescriptor {
   responsibility: string
   specialty: string | null
   assignable: boolean
+  model_route: { provider: string; model: string } | null
 }
 
 export type MessageRole = 'user' | 'assistant'

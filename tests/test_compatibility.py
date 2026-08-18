@@ -7,8 +7,10 @@ from work_harness.config.loader import load_app_config
 from work_harness.config.models import AppConfig
 from work_harness.llm.compatibility import inspect_provider_compatibility
 from work_harness.llm.mock import MockProvider
+from work_harness.llm.profiles import apply_provider_profiles
 from work_harness.llm.registry import ProviderAdapterRegistry
 from work_harness.runtime import build_runtime
+from work_harness.storage import ProviderProfileRecord
 from work_harness.tools.adapters import ToolAdapterRegistry
 from work_harness.tools.builtin import EchoReadTool
 
@@ -47,6 +49,35 @@ def test_configuration_rejects_provider_capability_drift() -> None:
 
     with pytest.raises(ValidationError, match="identical capabilities"):
         AppConfig.model_validate(payload)
+
+
+def test_persistent_profile_overlays_provider_and_per_agent_bindings() -> None:
+    config = load_app_config(PROJECT_ROOT)
+    profile = ProviderProfileRecord(
+        name="custom-model",
+        config=config.models.providers["compatible"].model_copy(
+            update={
+                "enabled": True,
+                "api_family": "responses",
+                "allowed_models": ["main-model", "worker-model"],
+            }
+        ),
+        model_bindings={"worker-fast": "worker-model"},
+        agent_bindings={"main": "main-model", "worker-02": "worker-model"},
+    )
+
+    configured = apply_provider_profiles(config, [profile])
+
+    assert configured.models.providers["custom-model"].api_family == "responses"
+    candidates = configured.models.logical_models["worker-fast"].candidates
+    assert any(
+        candidate.provider == "custom-model" and candidate.model == "worker-model"
+        for candidate in candidates
+    )
+    assert configured.models.agent_routes["planner"].model == "main-model"
+    assert configured.models.agent_routes["synthesizer"].model == "main-model"
+    assert configured.models.agent_routes["worker-02"].model == "worker-model"
+    assert "worker-01" not in configured.models.agent_routes
 
 
 def test_provider_and_tool_adapters_are_modular() -> None:

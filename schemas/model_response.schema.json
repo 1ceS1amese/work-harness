@@ -60,6 +60,26 @@
       "title": "Tool Calls",
       "type": "array"
     },
+    "reasoning_content": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Reasoning Content"
+    },
+    "response_items": {
+      "items": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "title": "Response Items",
+      "type": "array"
+    },
     "finish_reason": {
       "default": "stop",
       "title": "Finish Reason",

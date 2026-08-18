@@ -30,7 +30,13 @@ class SkillManifest(SkillModel):
             raise ValueError("skill compatible_providers must be unique")
         if len(self.preferred_providers) != len(set(self.preferred_providers)):
             raise ValueError("skill preferred_providers must be unique")
-        unknown = set(self.preferred_providers) - set(self.compatible_providers)
+        if "*" in self.compatible_providers and self.compatible_providers != ["*"]:
+            raise ValueError("provider wildcard must be the only compatible provider entry")
+        unknown = (
+            set()
+            if "*" in self.compatible_providers
+            else set(self.preferred_providers) - set(self.compatible_providers)
+        )
         if unknown:
             raise ValueError(f"preferred providers must be compatible: {sorted(unknown)}")
         return self

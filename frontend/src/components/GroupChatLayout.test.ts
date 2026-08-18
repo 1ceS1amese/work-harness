@@ -18,6 +18,7 @@ describe('群聊编排模板', () => {
             responsibility: '执行任务',
             specialty: '按任务选择功能',
             assignable: true,
+            model_route: null,
           },
           {
             id: 'worker-02',
@@ -25,6 +26,7 @@ describe('群聊编排模板', () => {
             responsibility: '执行任务',
             specialty: '按任务选择功能',
             assignable: true,
+            model_route: null,
           },
         ],
       },

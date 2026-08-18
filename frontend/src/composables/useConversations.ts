@@ -8,6 +8,7 @@ import type {
   Conversation,
   RiskLevel,
   RunStatus,
+  SkillSelection,
 } from '../types'
 
 const MAX_CONVERSATIONS = 30
@@ -46,6 +47,7 @@ function freshConversation(): Conversation {
     selectedAgentIds: [...DEFAULT_AGENT_IDS],
     functionsByAgent: { ...DEFAULT_FUNCTIONS },
     crossReview: true,
+    skillSelections: [],
     messages: [],
     createdAt: timestamp,
     updatedAt: timestamp,
@@ -80,6 +82,7 @@ function loadConversations(): Conversation[] {
             }),
           ),
         crossReview: item.crossReview ?? true,
+        skillSelections: item.skillSelections ?? [],
       }))
   } catch {
     return []
@@ -138,6 +141,7 @@ export function useConversations() {
         | 'selectedAgentIds'
         | 'functionsByAgent'
         | 'crossReview'
+        | 'skillSelections'
       >
     >,
   ): void {
@@ -211,6 +215,10 @@ export function useConversations() {
     })
   }
 
+  function setSkillSelections(skillSelections: SkillSelection[]): void {
+    updateConversation(activeConversation.value.id, { skillSelections })
+  }
+
   return {
     conversations,
     activeId,
@@ -224,5 +232,6 @@ export function useConversations() {
     setRunStatus,
     setDefaults,
     setCollaboration,
+    setSkillSelections,
   }
 }

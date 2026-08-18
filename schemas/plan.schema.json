@@ -66,6 +66,14 @@
           "title": "Allowed Tools",
           "type": "array"
         },
+        "skill_ids": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 8,
+          "title": "Skill Ids",
+          "type": "array"
+        },
         "acceptance_criteria": {
           "items": {
             "type": "string"

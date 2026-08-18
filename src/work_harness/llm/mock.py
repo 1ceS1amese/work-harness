@@ -11,8 +11,11 @@ from work_harness.domain.models import ModelRequest, ModelResponse, Usage
 class MockProvider:
     """Deterministic provider for tests, local development, and baseline replay."""
 
-    name = "mock"
+    protocol_version = "1.0"
     capabilities = frozenset({"chat", "structured_output", "tool_calling"})
+
+    def __init__(self, name: str = "mock") -> None:
+        self.name = name
 
     async def healthcheck(self) -> bool:
         return True

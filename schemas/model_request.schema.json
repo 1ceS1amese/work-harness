@@ -105,6 +105,21 @@
       "type": "array",
       "uniqueItems": true
     },
+    "provider_preferences": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Provider Preferences",
+      "type": "array"
+    },
+    "provider_allowlist": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Provider Allowlist",
+      "type": "array",
+      "uniqueItems": true
+    },
     "tools": {
       "items": {
         "additionalProperties": true,

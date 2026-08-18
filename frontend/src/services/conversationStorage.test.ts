@@ -43,6 +43,7 @@ describe('conversation storage adapter', () => {
       selectedAgentIds: ['worker-01'],
       functionsByAgent: { 'worker-01': ['execution'] },
       crossReview: true,
+      skillSelections: [],
       messages: [],
       createdAt: '2026-08-18T00:00:00Z',
       updatedAt: '2026-08-18T00:00:00Z',

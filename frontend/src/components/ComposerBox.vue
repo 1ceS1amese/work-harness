@@ -8,6 +8,8 @@ import type {
   AgentFunctionDescriptor,
   AllocationMode,
   RiskLevel,
+  SkillDescriptor,
+  SkillSelection,
 } from '../types'
 
 const content = defineModel<string>({ required: true })
@@ -20,6 +22,7 @@ const functionsByAgent = defineModel<Partial<Record<string, AgentFunction[]>>>(
   { required: true },
 )
 const crossReview = defineModel<boolean>('crossReview', { required: true })
+const skillSelections = defineModel<SkillSelection[]>('skillSelections', { required: true })
 
 const props = defineProps<{
   taskTypes: string[]
@@ -27,6 +30,7 @@ const props = defineProps<{
   functions: AgentFunctionDescriptor[]
   sending: boolean
   hasActiveRun: boolean
+  skills: SkillDescriptor[]
 }>()
 
 const emit = defineEmits<{
@@ -69,6 +73,28 @@ function toggleFunction(agentId: string, functionId: AgentFunction): void {
     : [...active, functionId]
   if (next.length === 0) return
   functionsByAgent.value = { ...functionsByAgent.value, [agentId]: next }
+}
+
+function selectedSkill(skillId: string): SkillSelection | undefined {
+  return skillSelections.value.find((item) => item.skill_id === skillId)
+}
+
+function toggleSkill(skill: SkillDescriptor): void {
+  const selected = selectedSkill(skill.id)
+  if (selected) {
+    skillSelections.value = skillSelections.value.filter((item) => item.skill_id !== skill.id)
+    return
+  }
+  skillSelections.value = [
+    ...skillSelections.value,
+    { skill_id: skill.id, provider: null },
+  ]
+}
+
+function setSkillProvider(skillId: string, provider: string): void {
+  skillSelections.value = skillSelections.value.map((item) =>
+    item.skill_id === skillId ? { ...item, provider: provider || null } : item,
+  )
 }
 </script>
 
@@ -133,6 +159,50 @@ function toggleFunction(agentId: string, functionId: AgentFunction): void {
                   {{ item.display_name }}
                 </button>
               </div>
+            </div>
+          </div>
+        </el-popover>
+        <el-popover v-if="skills.length" placement="top-start" :width="390" trigger="click">
+          <template #reference>
+            <button class="member-picker-trigger" type="button" aria-label="选择技能和 Provider">
+              技能 {{ skillSelections.length ? `(${skillSelections.length})` : '' }}
+            </button>
+          </template>
+          <div class="agent-picker skill-picker">
+            <div class="agent-picker-heading">
+              <div>
+                <strong>模块化技能</strong>
+                <p>选择任务能力；Provider 可自动路由或手动固定。</p>
+              </div>
+            </div>
+            <div
+              v-for="skill in skills"
+              :key="skill.id"
+              class="agent-picker-item skill-picker-item"
+              :class="{ selected: selectedSkill(skill.id) }"
+            >
+              <button class="agent-picker-member" type="button" @click="toggleSkill(skill)">
+                <span>
+                  <strong>{{ skill.id }}</strong>
+                  <small>{{ skill.description }}</small>
+                </span>
+                <b>{{ selectedSkill(skill.id) ? '已启用' : '启用' }}</b>
+              </button>
+              <el-select
+                v-if="selectedSkill(skill.id)"
+                :model-value="selectedSkill(skill.id)?.provider ?? ''"
+                size="small"
+                aria-label="Skill Provider"
+                @update:model-value="(value: string) => setSkillProvider(skill.id, value)"
+              >
+                <el-option label="自动选择 Provider" value="" />
+                <el-option
+                  v-for="provider in skill.available_providers"
+                  :key="provider"
+                  :label="provider"
+                  :value="provider"
+                />
+              </el-select>
             </div>
           </div>
         </el-popover>

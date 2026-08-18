@@ -317,6 +317,13 @@
           ],
           "default": null,
           "title": "Fallback From"
+        },
+        "skill_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Skill Ids",
+          "type": "array"
         }
       },
       "required": [
@@ -554,6 +561,35 @@
       "title": "Severity",
       "type": "string"
     },
+    "SkillSelection": {
+      "additionalProperties": false,
+      "properties": {
+        "skill_id": {
+          "maxLength": 64,
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+          "title": "Skill Id",
+          "type": "string"
+        },
+        "provider": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z][a-z0-9_-]{1,63}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Provider"
+        }
+      },
+      "required": [
+        "skill_id"
+      ],
+      "title": "SkillSelection",
+      "type": "object"
+    },
     "SubtaskSpec": {
       "additionalProperties": false,
       "properties": {
@@ -608,6 +644,14 @@
             "type": "string"
           },
           "title": "Allowed Tools",
+          "type": "array"
+        },
+        "skill_ids": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 8,
+          "title": "Skill Ids",
           "type": "array"
         },
         "acceptance_criteria": {
@@ -688,6 +732,14 @@
         },
         "assignment": {
           "$ref": "#/$defs/AgentAssignment"
+        },
+        "skills": {
+          "items": {
+            "$ref": "#/$defs/SkillSelection"
+          },
+          "maxItems": 8,
+          "title": "Skills",
+          "type": "array"
         },
         "ambiguities": {
           "items": {

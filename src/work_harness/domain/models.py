@@ -121,6 +121,14 @@ class AgentAssignment(ContractModel):
         return self
 
 
+class SkillSelection(ContractModel):
+    skill_id: str = Field(pattern=r"^[a-z0-9]+(?:-[a-z0-9]+)*$", max_length=64)
+    provider: str | None = Field(
+        default=None,
+        pattern=r"^[a-z][a-z0-9_-]{1,63}$",
+    )
+
+
 class TaskRequest(ContractModel):
     goal: str = Field(min_length=1, max_length=20_000)
     context: dict[str, Any] = Field(default_factory=dict)
@@ -129,7 +137,16 @@ class TaskRequest(ContractModel):
     task_type: str = Field(default="general", min_length=1, max_length=100)
     risk_level: RiskLevel = RiskLevel.LOW
     assignment: AgentAssignment = Field(default_factory=AgentAssignment)
+    skills: list[SkillSelection] = Field(default_factory=list, max_length=8)
     idempotency_key: str | None = Field(default=None, max_length=200)
+
+    @field_validator("skills")
+    @classmethod
+    def validate_unique_skills(cls, value: list[SkillSelection]) -> list[SkillSelection]:
+        ids = [item.skill_id for item in value]
+        if len(ids) != len(set(ids)):
+            raise ValueError("skills must be unique")
+        return value
 
 
 class TaskSpec(ContractModel):
@@ -141,6 +158,7 @@ class TaskSpec(ContractModel):
     task_type: str = "general"
     risk_level: RiskLevel = RiskLevel.LOW
     assignment: AgentAssignment = Field(default_factory=AgentAssignment)
+    skills: list[SkillSelection] = Field(default_factory=list, max_length=8)
     ambiguities: list[str] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=utc_now)
 
@@ -154,9 +172,17 @@ class SubtaskSpec(ContractModel):
     assigned_function: AgentFunction | None = None
     logical_model: str = "worker-fast"
     allowed_tools: list[str] = Field(default_factory=list)
+    skill_ids: list[str] = Field(default_factory=list, max_length=8)
     acceptance_criteria: list[str] = Field(min_length=1)
     token_budget: int = Field(default=5_000, ge=1)
     cost_budget_usd: float = Field(default=0.50, ge=0)
+
+    @field_validator("skill_ids")
+    @classmethod
+    def validate_unique_skill_ids(cls, value: list[str]) -> list[str]:
+        if len(value) != len(set(value)):
+            raise ValueError("subtask skill_ids must be unique")
+        return value
 
 
 class Plan(ContractModel):
@@ -280,6 +306,8 @@ class ModelRequest(ContractModel):
     logical_model: str
     messages: list[ModelMessage] = Field(min_length=1)
     required_capabilities: set[str] = Field(default_factory=lambda: {"chat"})
+    provider_preferences: list[str] = Field(default_factory=list)
+    provider_allowlist: set[str] = Field(default_factory=set)
     tools: list[dict[str, Any]] = Field(default_factory=list)
     response_schema: dict[str, Any] | None = None
     timeout_seconds: float = Field(default=60, gt=0)
@@ -287,6 +315,13 @@ class ModelRequest(ContractModel):
     cost_budget_usd: float = Field(default=1.0, ge=0)
     risk_level: RiskLevel = RiskLevel.LOW
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("provider_preferences")
+    @classmethod
+    def validate_provider_preferences(cls, value: list[str]) -> list[str]:
+        if len(value) != len(set(value)):
+            raise ValueError("provider preferences must be unique")
+        return value
 
 
 class ModelResponse(ContractModel):
@@ -316,6 +351,7 @@ class ModelCallRecord(ContractModel):
     latency_ms: int = Field(default=0, ge=0)
     retries: int = Field(default=0, ge=0)
     fallback_from: str | None = None
+    skill_ids: list[str] = Field(default_factory=list)
 
 
 class ToolCallRecord(ContractModel):

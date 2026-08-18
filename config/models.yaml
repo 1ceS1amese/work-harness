@@ -6,6 +6,11 @@ providers:
     enabled: true
     capabilities: [chat, structured_output, tool_calling]
     timeout_seconds: 5
+  mock-secondary:
+    adapter: mock
+    enabled: true
+    capabilities: [chat, structured_output, tool_calling]
+    timeout_seconds: 5
   compatible:
     adapter: openai_compatible
     enabled: false
@@ -26,6 +31,7 @@ logical_models:
     required_capabilities: [chat, structured_output]
     candidates:
       - {provider: mock, model: mock-worker}
+      - {provider: mock-secondary, model: mock-worker-secondary}
       - {provider: compatible, model: configured-model}
   reviewer-independent:
     required_capabilities: [chat, structured_output]
@@ -42,3 +48,9 @@ logical_models:
     candidates:
       - {provider: mock, model: mock-synthesizer}
       - {provider: compatible, model: configured-model}
+compatibility:
+  protocol_version: "1.0"
+  baseline_capabilities: [chat, structured_output, tool_calling]
+  enforce_baseline: true
+  require_capability_parity: true
+  require_truthful_declaration: true

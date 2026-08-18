@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -59,7 +59,7 @@ class RuntimeConfig(ConfigModel):
 
 
 class ProviderConfig(ConfigModel):
-    adapter: Literal["mock", "openai_compatible"]
+    adapter: str = Field(pattern=r"^[a-z][a-z0-9_]{1,63}$")
     enabled: bool = True
     base_url_env: str | None = None
     api_key_env: str | None = None
@@ -68,6 +68,7 @@ class ProviderConfig(ConfigModel):
     timeout_seconds: float = Field(default=60, gt=0)
     allow_insecure_http: bool = False
     allow_private_network: bool = False
+    options: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def validate_provider_contract(self) -> ProviderConfig:
@@ -78,6 +79,16 @@ class ProviderConfig(ConfigModel):
                     "api_key_env, and allowed_models"
                 )
         return self
+
+
+class ProviderCompatibilityConfig(ConfigModel):
+    protocol_version: str = "1.0"
+    baseline_capabilities: set[str] = Field(
+        default_factory=lambda: {"chat", "structured_output", "tool_calling"}
+    )
+    enforce_baseline: bool = True
+    require_capability_parity: bool = True
+    require_truthful_declaration: bool = True
 
 
 class ModelCandidateConfig(ConfigModel):
@@ -95,6 +106,7 @@ class ModelsConfig(ConfigModel):
     profile: str = "local"
     providers: dict[str, ProviderConfig]
     logical_models: dict[str, LogicalModelConfig]
+    compatibility: ProviderCompatibilityConfig = Field(default_factory=ProviderCompatibilityConfig)
 
 
 class AgentRoleConfig(ConfigModel):
@@ -189,6 +201,35 @@ class AppConfig(ConfigModel):
         logical_models = self.models.logical_models
         providers = self.models.providers
         tools = self.tools.tools
+
+        if self.models.compatibility.enforce_baseline:
+            for provider_name, provider in providers.items():
+                if not provider.enabled:
+                    continue
+                missing = self.models.compatibility.baseline_capabilities - provider.capabilities
+                if missing:
+                    raise ValueError(
+                        f"provider {provider_name} is missing baseline capabilities: "
+                        f"{sorted(missing)}"
+                    )
+
+        if self.models.compatibility.require_capability_parity:
+            capability_sets = {
+                provider_name: provider.capabilities
+                for provider_name, provider in providers.items()
+                if provider.enabled
+            }
+            reference = next(iter(capability_sets.values()), set())
+            mismatched = {
+                provider_name: sorted(capabilities)
+                for provider_name, capabilities in capability_sets.items()
+                if capabilities != reference
+            }
+            if mismatched:
+                raise ValueError(
+                    "enabled providers must declare identical capabilities: "
+                    f"{mismatched}"
+                )
 
         for role_name, role in self.agents.agents.items():
             if role.logical_model not in logical_models:

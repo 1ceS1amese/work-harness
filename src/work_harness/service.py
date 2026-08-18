@@ -114,6 +114,7 @@ class RunManager:
         }
 
     async def start(self, request: TaskRequest) -> str:
+        self.runtime.skill_registry.validate_selections(request.skills)
         run_id = f"run_{uuid4().hex}"
         request_payload = request.model_dump(mode="json", exclude={"idempotency_key"})
         request_fingerprint = self._fingerprint(request_payload)

@@ -33,10 +33,37 @@ class ModelGateway:
 
         last_error: Exception | None = None
         fallback_from: str | None = None
-        required_capabilities = (
-            request.required_capabilities | logical.required_capabilities
+        required_capabilities = request.required_capabilities | logical.required_capabilities
+        candidate_providers = {candidate.provider for candidate in logical.candidates}
+        unknown_allowlist = request.provider_allowlist - candidate_providers
+        if unknown_allowlist:
+            raise ModelGatewayError(
+                f"provider allowlist is not a candidate for {request.logical_model}: "
+                f"{sorted(unknown_allowlist)}"
+            )
+        unknown_preferences = set(request.provider_preferences) - candidate_providers
+        if unknown_preferences:
+            raise ModelGatewayError(
+                f"provider preferences are not candidates for {request.logical_model}: "
+                f"{sorted(unknown_preferences)}"
+            )
+
+        candidates = [
+            candidate
+            for candidate in logical.candidates
+            if not request.provider_allowlist or candidate.provider in request.provider_allowlist
+        ]
+        preference_order = {
+            provider: index for index, provider in enumerate(request.provider_preferences)
+        }
+        candidates = sorted(
+            enumerate(candidates),
+            key=lambda item: (
+                preference_order.get(item[1].provider, len(preference_order)),
+                item[0],
+            ),
         )
-        for candidate in logical.candidates:
+        for _, candidate in candidates:
             provider_config = self._config.providers[candidate.provider]
             provider = self._providers.get(candidate.provider)
             if not provider_config.enabled or provider is None:

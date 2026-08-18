@@ -23,6 +23,7 @@ class InvalidModelRequestError(ModelGatewayError):
 
 class ModelProvider(Protocol):
     name: str
+    protocol_version: str
     capabilities: frozenset[str]
 
     async def complete(self, request: ModelRequest, *, model: str) -> ModelResponse: ...

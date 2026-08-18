@@ -1,0 +1,4 @@
+interface:
+  display_name: "仓库分析"
+  short_description: "在受限工作区内分析代码仓库并输出可追溯、可复核的结构化结论"
+  default_prompt: "Use $repository-analysis to inspect this repository and produce traceable findings."

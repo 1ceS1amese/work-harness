@@ -36,6 +36,28 @@ async def test_api_creates_and_queries_run(tmp_path: Path, monkeypatch) -> None:
                 "execution",
                 "risk",
             }
+            assert capabilities.json()["provider_contract"]["compatible"] is True
+            assert {item["provider"] for item in capabilities.json()["providers"]} == {
+                "mock",
+                "mock-secondary",
+            }
+            assert {item["id"] for item in capabilities.json()["skills"]} == {
+                "repository-analysis",
+                "risk-audit",
+            }
+
+            compatibility = await client.get("/v1/compatibility")
+            assert compatibility.status_code == 200
+            assert compatibility.json()["providers"]["compatible"] is True
+
+            invalid_skill = await client.post(
+                "/v1/runs",
+                json={
+                    "goal": "Check risks",
+                    "skills": [{"skill_id": "risk-audit", "provider": "compatible"}],
+                },
+            )
+            assert invalid_skill.status_code == 422
 
             response = await client.post("/v1/runs", json={"goal": "Create a checklist"})
             assert response.status_code == 202

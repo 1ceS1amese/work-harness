@@ -9,6 +9,11 @@ export interface AgentAssignment {
   cross_review: boolean
 }
 
+export interface SkillSelection {
+  skill_id: string
+  provider: string | null
+}
+
 export type RunStatus =
   | 'pending'
   | 'running'
@@ -26,6 +31,7 @@ export interface TaskRequest {
   task_type?: string
   risk_level?: RiskLevel
   assignment?: AgentAssignment
+  skills?: SkillSelection[]
   idempotency_key?: string | null
 }
 
@@ -45,6 +51,7 @@ export interface SubtaskSpec {
   assigned_function: AgentFunction | null
   logical_model: string
   allowed_tools: string[]
+  skill_ids?: string[]
   acceptance_criteria: string[]
   token_budget: number
   cost_budget_usd: number
@@ -127,6 +134,7 @@ export interface ModelCallRecord {
   latency_ms: number
   retries: number
   fallback_from: string | null
+  skill_ids?: string[]
 }
 
 export interface ToolCallRecord {
@@ -174,11 +182,47 @@ export interface HealthResponse {
   providers: Record<string, unknown>
   checkpoint: string
   run_store: string
+  provider_compatible: boolean
+}
+
+export interface ProviderCompatibilityItem {
+  provider: string
+  adapter: string
+  protocol_version: string
+  capabilities: string[]
+  configured_capabilities: string[]
+  baseline_capabilities: string[]
+  compatible: boolean
+  issues: string[]
+}
+
+export interface ProviderContractDescriptor {
+  protocol_version: string
+  baseline_capabilities: string[]
+  compatible: boolean
+}
+
+export interface SkillDescriptor {
+  id: string
+  description: string
+  version: string
+  logical_model: string
+  required_capabilities: string[]
+  allowed_tools: string[]
+  compatible_providers: string[]
+  preferred_providers: string[]
+  available_providers: string[]
+  applies_to: AgentFunction[]
 }
 
 export interface CapabilitiesResponse {
   logical_models: string[]
   tools: string[]
+  tool_adapters: string[]
+  provider_adapters: string[]
+  provider_contract: ProviderContractDescriptor
+  providers: ProviderCompatibilityItem[]
+  skills: SkillDescriptor[]
   task_types: string[]
   allocation_modes: AllocationMode[]
   functions: AgentFunctionDescriptor[]
@@ -219,6 +263,7 @@ export interface Conversation {
   selectedAgentIds: string[]
   functionsByAgent: Partial<Record<string, AgentFunction[]>>
   crossReview: boolean
+  skillSelections: SkillSelection[]
   messages: ChatMessage[]
   createdAt: string
   updatedAt: string

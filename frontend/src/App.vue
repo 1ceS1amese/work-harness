@@ -18,6 +18,8 @@ import type {
   ChatMessage,
   RiskLevel,
   RunResult,
+  SkillDescriptor,
+  SkillSelection,
 } from './types'
 import { ACTIVE_RUN_STATUSES, resultMessage } from './utils/run'
 
@@ -33,6 +35,7 @@ const {
   setRunStatus,
   setDefaults,
   setCollaboration,
+  setSkillSelections,
 } = useConversations()
 
 const prompt = ref('')
@@ -43,6 +46,7 @@ const selectedRunId = ref<string | null>(null)
 const actionBusyRunId = ref<string | null>(null)
 const backendState = ref<'checking' | 'online' | 'offline' | 'auth'>('checking')
 const taskTypes = ref(['general', 'planning', 'decision', 'research', 'code'])
+const skills = ref<SkillDescriptor[]>([])
 const agentFunctions = ref<AgentFunctionDescriptor[]>([
   { id: 'analysis', display_name: '分析', description: '梳理需求与比较方案' },
   { id: 'research', display_name: '研究', description: '收集资料与可追溯证据' },
@@ -139,6 +143,10 @@ const crossReview = computed({
       activeConversation.value.functionsByAgent,
       value,
     ),
+})
+const skillSelections = computed({
+  get: () => activeConversation.value.skillSelections,
+  set: (value: SkillSelection[]) => setSkillSelections(value),
 })
 const groupAgents = computed(() => {
   return selectedAgentIds.value
@@ -292,6 +300,7 @@ async function checkConnection(): Promise<void> {
     if (capabilities.task_types.length > 0) taskTypes.value = capabilities.task_types
     if (capabilities.functions?.length > 0) agentFunctions.value = capabilities.functions
     if (capabilities.agents.length > 0) agents.value = capabilities.agents
+    skills.value = capabilities.skills ?? []
   } catch (error) {
     if (lifecycleController.signal.aborted) return
     backendState.value = error instanceof ApiError && error.status === 401 ? 'auth' : 'offline'
@@ -313,6 +322,7 @@ async function sendTask(): Promise<void> {
   const conversationId = activeConversation.value.id
   const selectedTaskType = activeConversation.value.taskType
   const selectedRiskLevel = activeConversation.value.riskLevel
+  const selectedSkills = activeConversation.value.skillSelections.map((item) => ({ ...item }))
   const mentionedAgents = agents.value.filter(
     (agent) =>
       agent.assignable &&
@@ -350,6 +360,7 @@ async function sendTask(): Promise<void> {
         ),
         cross_review: activeConversation.value.crossReview,
       },
+      skills: selectedSkills,
       idempotency_key: `${conversationId}:${assistant.id}`,
     })
     patchMessage(conversationId, assistant.id, {
@@ -553,11 +564,13 @@ onBeforeUnmount(() => {
         v-model:selected-agent-ids="selectedAgentIds"
         v-model:functions-by-agent="functionsByAgent"
         v-model:cross-review="crossReview"
+        v-model:skill-selections="skillSelections"
         :task-types="taskTypes"
         :agents="agents"
         :functions="agentFunctions"
         :sending="sending"
         :has-active-run="Boolean(activeRunMessage)"
+        :skills="skills"
         @send="sendTask"
         @cancel="cancelCurrentRun"
         @mention="insertMention"

@@ -1,6 +1,8 @@
 providers:
   mock:
     enabled: false
+  mock-secondary:
+    enabled: false
   compatible:
     enabled: true
 logical_models:

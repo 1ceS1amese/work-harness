@@ -7,7 +7,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from work_harness.config.loader import default_project_root, load_app_config
-from work_harness.domain.models import TaskRequest
+from work_harness.domain.models import SkillSelection, TaskRequest
 from work_harness.evaluation import run_evaluation, save_report
 from work_harness.runtime import build_runtime
 from work_harness.service import RunManager
@@ -22,9 +22,22 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--goal", required=True)
     run.add_argument("--task-type", default="general")
     run.add_argument("--risk-level", choices=["low", "medium", "high", "critical"], default="low")
+    run.add_argument(
+        "--skill",
+        action="append",
+        default=[],
+        metavar="SKILL[@PROVIDER]",
+        help="Select a Skill and optionally pin its Provider; may be repeated",
+    )
 
     subparsers.add_parser("check-config", help="Validate configuration and references")
     subparsers.add_parser("export-schemas", help="Export Pydantic contracts as JSON Schema")
+    skills = subparsers.add_parser("skills", help="List or validate project Skills")
+    skills.add_argument("action", choices=["list", "validate"])
+    subparsers.add_parser(
+        "check-compatibility",
+        help="Validate Provider, Tool, and Skill compatibility",
+    )
 
     evaluate = subparsers.add_parser("eval", help="Run the fixed offline evaluation set")
     evaluate.add_argument("--cases", type=Path)
@@ -37,10 +50,24 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 async def _run_task(args: argparse.Namespace) -> int:
+    selections = []
+    for raw in args.skill:
+        skill_id, separator, provider = raw.partition("@")
+        selections.append(
+            SkillSelection(
+                skill_id=skill_id,
+                provider=provider if separator else None,
+            )
+        )
     async with build_runtime(args.project_root) as runtime:
         manager = RunManager(runtime)
         run_id = await manager.start(
-            TaskRequest(goal=args.goal, task_type=args.task_type, risk_level=args.risk_level)
+            TaskRequest(
+                goal=args.goal,
+                task_type=args.task_type,
+                risk_level=args.risk_level,
+                skills=selections,
+            )
         )
         result = await manager.wait(run_id)
         print(result.model_dump_json(indent=2))
@@ -56,6 +83,23 @@ async def _run_eval(args: argparse.Namespace) -> int:
     save_report(report, output)
     print(json.dumps(report, ensure_ascii=False, indent=2, default=str))
     return 0 if report["bad_case_count"] == 0 else 1
+
+
+async def _inspect_compatibility(args: argparse.Namespace) -> int:
+    async with build_runtime(args.project_root, checkpoint_backend="memory") as runtime:
+        skills = [item.model_dump(mode="json") for item in runtime.skill_registry.descriptors()]
+        if args.command == "skills" and args.action == "list":
+            payload: object = skills
+        else:
+            payload = {
+                "status": "ok",
+                "providers": runtime.provider_compatibility.model_dump(mode="json"),
+                "provider_adapters": runtime.provider_adapters.adapters,
+                "tool_adapters": runtime.tool_adapters.adapters,
+                "skills": skills,
+            }
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+    return 0
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -91,6 +135,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return asyncio.run(_run_task(args))
     if args.command == "eval":
         return asyncio.run(_run_eval(args))
+    if args.command in {"skills", "check-compatibility"}:
+        return asyncio.run(_inspect_compatibility(args))
     if args.command == "serve":
         import uvicorn
 

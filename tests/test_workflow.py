@@ -6,6 +6,7 @@ from work_harness.domain.enums import AllocationMode, RiskLevel, RunStatus
 from work_harness.domain.models import (
     AgentAssignment,
     ModelResponse,
+    SkillSelection,
     TaskRequest,
     Usage,
 )
@@ -81,6 +82,32 @@ async def test_functional_assignment_routes_homogeneous_agents() -> None:
     }
     assert len(result.reviews) == 2
     assert {item.dimension for item in result.reviews} == {"constraint"}
+
+
+@pytest.mark.asyncio
+async def test_skill_routes_workers_to_selected_provider() -> None:
+    async with build_runtime(PROJECT_ROOT, checkpoint_backend="memory") as runtime:
+        manager = RunManager(runtime)
+        run_id = await manager.start(
+            TaskRequest(
+                goal="Audit the repository delivery risks",
+                skills=[
+                    SkillSelection(
+                        skill_id="risk-audit",
+                        provider="mock-secondary",
+                    )
+                ],
+            )
+        )
+        result = await manager.wait(run_id)
+
+    assert result.status == RunStatus.SUCCEEDED
+    assert result.plan is not None
+    assert all(item.skill_ids == ["risk-audit"] for item in result.plan.subtasks)
+    worker_calls = [item for item in result.model_calls if item.node == "worker"]
+    assert worker_calls
+    assert {item.provider for item in worker_calls} == {"mock-secondary"}
+    assert all(item.skill_ids == ["risk-audit"] for item in worker_calls)
 
 
 @pytest.mark.asyncio

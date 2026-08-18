@@ -1,0 +1,18 @@
+schema_version: 1
+version: 1.0.0
+logical_model: worker-fast
+required_capabilities:
+  - chat
+  - structured_output
+  - tool_calling
+allowed_tools:
+  - workspace_read
+compatible_providers:
+  - mock
+  - mock-secondary
+  - compatible
+preferred_providers:
+  - mock-secondary
+  - mock
+  - compatible
+applies_to: []

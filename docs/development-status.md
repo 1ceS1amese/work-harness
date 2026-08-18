@@ -2,11 +2,11 @@
 
 > 报告日期：2026-08-18  
 > 项目目录：`/home/s1amese/work-harness`  
-> 当前阶段：本地框架闭环已加固，真实模型验收、业务系统工具和生产基础设施待接入
+> 当前阶段：本地框架闭环、Provider 兼容合同与模块化 Skill 组装已完成；真实模型验收、业务系统工具和生产基础设施待接入
 
 ## 1. 结论摘要
 
-Work Harness 已经具备一套可运行、可测试、可持久化的多 Agent 编排框架：后端可接收任务并执行完整工作流，四个同构中文 Agent 可以进行任务分配、受限只读工具调用、交叉审查、裁决、修复和汇总；前端采用 Vue 3、TypeScript 和 Element Plus 实现类群聊式交互，并以 SSE 优先、查询补偿的方式展示状态；运行状态、幂等索引、执行租约和浏览器会话均有持久化方案。
+Work Harness 已经具备一套可运行、可测试、可持久化的多 Agent 编排框架：后端可接收任务并执行完整工作流，四个同构中文 Agent 可以进行任务分配、受限只读工具调用、交叉审查、裁决、修复和汇总；所有启用 Provider 必须通过同一协议、相同能力集合和真实能力声明检查；任务能力可通过 Skill 模块化组合，并自动或手动路由到兼容 Provider。前端采用 Vue 3、TypeScript 和 Element Plus 实现类群聊式交互，并以 SSE 优先、查询补偿的方式展示状态；运行状态、幂等索引、执行租约和浏览器会话均有持久化方案。
 
 当前可以用于：
 
@@ -38,6 +38,8 @@ Work Harness 已经具备一套可运行、可测试、可持久化的多 Agent 
 5. Agent 的差异来自本次任务分配的 `function`、目标、依赖和上下文，不来自固定身份。
 6. LangGraph 只负责流程编排；模型、工具、存储、Prompt 和评估通过独立接口接入。
 7. 需要机器处理的数据继续使用 Pydantic/JSON 结构化契约，避免依赖自然语言字符串解析。
+8. 所有启用 Provider 必须遵守相同协议和完全相同的可移植能力集合；不允许静默能力降级。
+9. 任务能力通过 Skill 声明逻辑模型、工具和 Provider 兼容范围，节点不得硬编码 Skill 对某供应商的依赖。
 
 ## 3. 当前系统架构
 
@@ -49,6 +51,7 @@ flowchart LR
     RM --> WF[LangGraph 工作流]
     WF --> CP[Checkpoint<br/>完整 Graph State]
     WF --> MM[Model Router / Provider]
+    WF --> SK[Skill Registry<br/>能力与 Provider 路由]
     WF --> TG[Tool Gateway / Registry]
     WF --> TR[Trace / Metrics]
     UI --> CS[ConversationStorage<br/>浏览器会话]
@@ -75,8 +78,9 @@ Normalize
 | 运行服务 | `src/work_harness/service.py` | `RunManager`，统一管理运行生命周期 |
 | 工作流 | `src/work_harness/workflow/` | Graph 构建、节点执行、状态迁移和终止控制 |
 | 节点实现 | `src/work_harness/workflow/nodes.py` | `WorkflowNodes`，实现规划、执行、审查、裁决、修复与汇总 |
-| 数据契约 | `src/work_harness/contracts/` | 请求、任务、工件、审查、裁决和最终结果等结构化模型 |
-| 模型层 | `src/work_harness/models/` | Provider 接口、Mock Provider、OpenAI-compatible Provider 和模型路由 |
+| 数据契约 | `src/work_harness/domain/` | 请求、任务、Skill 选择、工件、审查、裁决和最终结果等结构化模型 |
+| 模型层 | `src/work_harness/llm/` | Provider 接口、Adapter 注册、兼容报告和逻辑模型路由 |
+| Skill 层 | `src/work_harness/skills/`、`skills/` | Skill 加载、静态兼容检查、组合和 Provider/Tool 路由 |
 | 工具层 | `src/work_harness/tools/` | Tool Registry、Gateway、权限、超时和审批边界 |
 | 运行存储 | `src/work_harness/storage/` | `RunStore` 接口及 Memory/SQLite 实现 |
 | 配置 | `src/work_harness/config/`、`config/` | 类型化配置、运行限制、模型、Agent 和工具配置 |
@@ -94,19 +98,22 @@ Normalize
 | Agent 交叉审查 | 已完成 | Reviewer、Judge 节点已进入主流程 |
 | 结构化数据契约 | 已完成 | 主要输入输出由 Pydantic 模型约束 |
 | 模型调用抽象 | 框架完成，待真实验收 | Mock 可运行；OpenAI-compatible 已有生产 Profile、协议错误映射和契约测试 |
+| Provider 能力全等 | 已完成 | 启动时校验协议版本、基线能力、启用 Provider 能力集合全等及运行时真实声明 |
+| Provider/Tool 插件组装 | 已完成 | 内置注册表加 `work_harness.providers`、`work_harness.tools` 入口点扩展 |
+| 模块化 Skill | 已完成 | 标准 `SKILL.md` 加机器清单，支持能力/工具校验、组合、首选和手动 Provider 路由 |
 | 工具注册与网关 | 已完成只读闭环 | 已打通模型 tool call；除 `echo_read` 外新增受限 `workspace_read` |
 | Graph Checkpoint | 已完成 | 支持 Memory/SQLite，默认 SQLite |
 | RunStore | 已完成 | 支持 Memory/SQLite，默认 SQLite，保存运行索引、状态与幂等信息 |
 | 浏览器会话持久化 | 已完成 | `localStorage` 保存会话；仅限当前浏览器 |
 | 服务端会话同步 | 未完成 | 尚无账号级会话仓储和多端同步 |
-| Vue 群聊式前端 | 已完成 | 创建任务、轮询状态、恢复/取消、查看详情、会话本地保存 |
+| Vue 群聊式前端 | 已完成 | 创建任务、Skill/Provider 选择、状态流、恢复/取消、详情和会话本地保存 |
 | 异常运行恢复 | 已完成单实例闭环 | RunStore 租约、心跳、启动扫描；只从已有 Checkpoint 续跑 |
 | 实时流式推送 | 已完成状态流 | SSE 发送运行快照，前端断线后使用查询接口补偿 |
-| 自动化测试 | 已完成扩展集 | 后端 32 项、前端 8 项通过 |
+| 自动化测试 | 已完成扩展集 | 后端 41 项、前端 8 项通过 |
 | 评估框架 | 已完成扩展集 | 10 个 Mock 契约用例通过，不代表真实任务质量 |
 | 身份、租户、限流 | 未完成 | 只具备本地/API 鉴权配置边界，不是完整生产安全方案 |
 | 多实例与任务队列 | 未完成 | 当前 SQLite/进程内并发适合单实例开发环境 |
-| Git 版本基线 | 未完成 | 当前项目目录尚未初始化为 Git 仓库 |
+| Git 版本基线 | 已完成 | `main` 分支已有可回滚基线提交，本轮兼容性改造可独立审查 |
 
 ## 5. 多 Agent 编排当前实现
 
@@ -193,6 +200,7 @@ SQLite 实现已经包含 WAL、busy timeout、参数绑定、进程内异步写
 | --- | --- | --- |
 | GET | `/health` | 服务健康检查 |
 | GET | `/v1/capabilities` | 返回 Agent、模型、工具等可用能力 |
+| GET | `/v1/compatibility` | 返回 Provider 合同、Adapter 和 Skill 兼容性报告 |
 | POST | `/v1/runs` | 创建一次运行 |
 | GET | `/v1/runs` | 分页列出运行 |
 | GET | `/v1/runs/{run_id}` | 查询运行详情和结果 |
@@ -228,6 +236,7 @@ SQLite 实现已经包含 WAL、busy timeout、参数绑定、进程内异步写
 - 恢复或取消运行；
 - 刷新页面后恢复本地会话；
 - 调用后端能力和运行接口；
+- 为每个会话选择一个或多个 Skill，并自动选择或手动固定可用 Provider；
 - SSE 实时更新，断线后自动回退到查询轮询。
 
 后续前端开发重点不应是重做视觉层，而应是：服务端会话同步、身份隔离、真实写工具审批和生产错误提示。
@@ -236,7 +245,7 @@ SQLite 实现已经包含 WAL、busy timeout、参数绑定、进程内异步写
 
 ### 9.1 模型
 
-模型层的接口和路由框架已经完成，默认使用 Mock Provider。OpenAI-compatible Provider 已补齐生产 Profile、请求/响应契约测试、结构化输出解析和 HTTP/传输错误映射，但尚未配置真实凭据和模型，也没有真实任务质量基线。
+模型层的接口和路由框架已经完成，默认使用两个能力完全相同的 Mock Provider 验证 Provider 选择。所有启用 Provider 需要通过协议 `1.0`、基线能力、能力集合全等和配置/运行时声明一致检查。OpenAI-compatible Provider 已补齐生产 Profile、请求/响应契约测试、结构化输出解析和 HTTP/传输错误映射，但尚未配置真实凭据和模型，也没有真实任务质量基线。
 
 当前逻辑模型角色包括：
 
@@ -248,11 +257,21 @@ SQLite 实现已经包含 WAL、busy timeout、参数绑定、进程内异步写
 
 这些是逻辑路由角色，不应在业务代码中直接绑定供应商模型名。真实模型名、地址和密钥应通过配置及环境变量注入。
 
+Provider Adapter 由 `ProviderAdapterRegistry` 组装，外部包可通过 `work_harness.providers` 入口点注册。`check-compatibility` 会输出实际 Provider、Adapter、协议和能力报告。
+
 ### 9.2 工具
 
 工具层已把 Registry、Gateway、模型 tool call、参数契约、角色白名单、超时、结果截断和审批边界接入主工作流。除测试用 `echo_read` 外，新增受限 `workspace_read`，支持项目内读取、列目录和文本搜索；它限制路径、文件类型、大小、行数和扫描量，并将输入哈希与输出摘要记录到 Graph State。下一阶段应接入一个部署环境中的只读知识或业务查询工具，再逐步增加写操作工具。
 
-### 9.3 Prompt
+Tool Handler 也改为由 `ToolAdapterRegistry` 组装，外部包可使用 `work_harness.tools` 入口点；配置、角色权限与 Gateway 安全边界不因插件化而绕过。
+
+### 9.3 Skill
+
+运行时 Skill 使用标准 `SKILL.md` 指令文件和 `agents/work-harness.yaml` 兼容清单，声明逻辑模型、能力、工具、兼容 Provider、首选顺序和适用职能。启动会拒绝未知或不兼容声明；任务级 Provider 覆盖必须属于 Skill 的实际可用集合。多个 Skill 组合需要共享逻辑模型和至少一个共同 Provider。
+
+仓库内提供 `repository-analysis`、`risk-audit` 两个可运行示例，以及 `create-provider-skill` 编写指南。详细合同见 `docs/provider-skill-compatibility.md`。
+
+### 9.4 Prompt
 
 Prompt 应继续通过集中配置或注册机制管理，并记录版本。任何真实模型调优都应与评估集绑定，不能只依据少量手工对话判断质量提升。
 
@@ -264,11 +283,12 @@ Prompt 应继续通过集中配置或注册机制管理，并记录版本。任�
 | --- | --- | --- |
 | 配置检查 | `uv run work-harness check-config` | 通过；本地配置、Agent、模型角色、工具和 SQLite 存储加载正常 |
 | Python 静态检查 | `uv run ruff check src tests` | 通过，无检查错误 |
-| 后端测试 | `uv run pytest` | 32 项通过，耗时约 2.36 秒 |
-| 基础评估 | `uv run work-harness eval` | 10/10 契约检查通过，错误率 0，平均延迟约 18.8 ms |
+| Provider/Skill 兼容检查 | `uv run work-harness check-compatibility` | 通过；2 个启用 Provider 等能力，2 个运行时 Skill 均有可用 Provider |
+| 后端测试 | `uv run pytest` | 41 项通过，包含 Provider 全等、Adapter、Skill 组合和指定 Provider 路由 |
+| 基础评估 | `uv run work-harness eval` | 10/10 契约检查通过，错误率 0，平均延迟约 30.1 ms |
 | 前端类型检查 | `npm run type-check` | 通过 |
 | 前端测试 | `npm run test -- --run` | 4 个测试文件、8 项测试全部通过 |
-| 前端生产构建 | `npm run build` | 通过；CSS 约 126.65 kB，JS 约 434.36 kB |
+| 前端生产构建 | `npm run build` | 通过；CSS 约 126.78 kB，JS 约 436.84 kB |
 
 基础评估当前只验证 Mock 工作流能否稳定闭环：
 
@@ -277,8 +297,8 @@ case_count: 10
 success_rate: 1.0
 error_rate: 0.0
 bad_case_count: 0
-average_latency_ms: 18.8
-p95_latency_ms: 23.0
+average_latency_ms: 30.1
+p95_latency_ms: 35.0
 structured_parse_error_rate: 0.0
 average_steps_proxy: 10.8
 total_estimated_cost_usd: 0.0
@@ -297,7 +317,7 @@ quality_claim: false
 
 ### P1：真实模型接入与真实评估缺失
 
-**位置：** `src/work_harness/models/`、`config/models.yaml`、`evaluation/`。  
+**位置：** `src/work_harness/llm/`、`config/models.yaml`、`evaluation/`。
 **影响：** 目前无法判断多 Agent 编排的实际答案质量、成本、延迟和稳定性。  
 **建议：** 接入一个 OpenAI-compatible 测试模型，建立 10–20 条人工标注的最小真实评估集，再调整 Prompt、并发和修复策略。  
 **风险：** 真实模型输出、速率限制、结构化响应兼容性和成本可能暴露新问题。
@@ -354,7 +374,7 @@ quality_claim: false
 4. 运行配置检查、后端测试、前端测试和构建。
 5. 初始化 Git，提交当前基线。
 
-完成标准：后端 32 项测试和前端 8 项测试通过，10/10 Mock 契约评估通过，生产构建成功，Git 工作区干净。
+完成标准：后端 41 项测试和前端 8 项测试通过，10/10 Mock 契约评估通过，生产构建成功，Git 工作区干净。
 
 ### 阶段 1：接入一个真实模型并建立质量基线
 
@@ -444,16 +464,23 @@ npm run dev
 
 ### 新增或切换模型
 
-1. 在 `src/work_harness/models/` 实现或复用 Provider 接口。
-2. 在模型配置中维护逻辑角色到实际模型的映射。
+1. 实现或复用 `src/work_harness/llm/` 的 Provider 接口，并通过 `ProviderAdapterRegistry` 或 `work_harness.providers` 入口点注册。
+2. 在模型配置中维护逻辑角色到实际模型的映射，并保持所有启用 Provider 能力集合全等。
 3. 密钥只从环境变量读取。
 4. 增加结构化响应、重试、超时和错误映射的契约测试。
 5. 运行真实评估并保存 baseline，不以单次对话作为验收。
 
+### 新增 Skill
+
+1. 使用 `skills/create-provider-skill` 创建标准 `SKILL.md` 与 `agents/work-harness.yaml`。
+2. 只声明实际需要的能力和 Tool，并列出已验证的兼容 Provider。
+3. 运行 `work-harness skills validate` 和 `work-harness check-compatibility`。
+4. 为自动 Provider 路由与手动 Provider 选择补充测试。
+
 ### 新增工具
 
 1. 定义严格的输入/输出 schema。
-2. 在 `src/work_harness/tools/` 中实现并注册。
+2. 在 `src/work_harness/tools/` 中实现，并通过 `ToolAdapterRegistry` 或 `work_harness.tools` 入口点注册。
 3. 在 `config/tools.yaml` 配置权限和可用范围。
 4. 对参数错误、越权、超时、长输出和敏感信息进行测试。
 5. 写操作工具默认要求显式审批和更细权限。

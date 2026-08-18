@@ -37,6 +37,7 @@ from work_harness.domain.models import (
 from work_harness.llm.gateway import ModelGateway
 from work_harness.observability.trace import TraceRecorder
 from work_harness.prompts import PromptRegistry
+from work_harness.skills import SkillRegistry
 from work_harness.tools.gateway import ToolGateway
 from work_harness.workflow.state import GraphState, latest_artifacts, latest_reviews
 
@@ -52,12 +53,14 @@ class WorkflowNodes:
         prompts: PromptRegistry,
         trace: TraceRecorder,
         tool_gateway: ToolGateway,
+        skills: SkillRegistry,
     ) -> None:
         self.config = config
         self.gateway = gateway
         self.prompts = prompts
         self.trace = trace
         self.tool_gateway = tool_gateway
+        self.skills = skills
         self.worker_slots = asyncio.Semaphore(config.runtime.worker_max_concurrency)
         self.reviewer_slots = asyncio.Semaphore(config.runtime.reviewer_max_concurrency)
 
@@ -110,7 +113,12 @@ class WorkflowNodes:
         return output_model.model_validate(response.structured_output), response
 
     @staticmethod
-    def _model_call(node: str, response: ModelResponse) -> dict[str, Any]:
+    def _model_call(
+        node: str,
+        response: ModelResponse,
+        *,
+        skill_ids: tuple[str, ...] = (),
+    ) -> dict[str, Any]:
         return ModelCallRecord(
             node=node,
             provider=response.provider,
@@ -122,6 +130,7 @@ class WorkflowNodes:
             latency_ms=response.latency_ms,
             retries=response.retries,
             fallback_from=response.fallback_from,
+            skill_ids=list(skill_ids),
         ).model_dump(mode="json")
 
     @staticmethod
@@ -166,14 +175,23 @@ class WorkflowNodes:
         max_steps: int,
     ) -> tuple[Artifact, list[ModelResponse], list[dict[str, Any]]]:
         prompt = self.prompts.get("worker")
+        task = TaskSpec.model_validate(state["task"])
+        skill_context = self.skills.resolve(
+            task.skills,
+            subtask.skill_ids,
+            function=subtask.assigned_function,
+        )
         payload = {
             "task": state["task"],
             "subtask": subtask.model_dump(mode="json"),
             "version": state.get("artifact_version", 1),
             "repair_round": state.get("repair_round", 0),
         }
+        system_content = prompt.body
+        if skill_context.instructions:
+            system_content = f"{system_content}\n\n{skill_context.instructions}"
         messages = [
-            ModelMessage(role="system", content=prompt.body),
+            ModelMessage(role="system", content=system_content),
             ModelMessage(
                 role="user",
                 content=json.dumps(payload, ensure_ascii=False, default=str),
@@ -194,7 +212,10 @@ class WorkflowNodes:
                 logical_model=subtask.logical_model,
                 messages=messages,
                 required_capabilities={"chat", "structured_output"}
+                | set(skill_context.required_capabilities)
                 | ({"tool_calling"} if tools else set()),
+                provider_preferences=list(skill_context.provider_preferences),
+                provider_allowlist=set(skill_context.provider_allowlist),
                 tools=tools,
                 response_schema=Artifact.model_json_schema(),
                 timeout_seconds=self.config.runtime.node_timeout_seconds,
@@ -207,6 +228,7 @@ class WorkflowNodes:
                     "prompt_name": prompt.name,
                     "prompt_version": prompt.version,
                     "tool_round": len(tool_records),
+                    "skill_ids": list(skill_context.skill_ids),
                 },
             )
             response = await self.gateway.complete(request)
@@ -273,6 +295,7 @@ class WorkflowNodes:
         run_id = state["run_id"]
         async with self.trace.span(run_id=run_id, node="normalize"):
             request = TaskRequest.model_validate(state["raw_input"])
+            self.skills.validate_selections(request.skills)
             risk = request.risk_level
             lower_goal = request.goal.casefold()
             high_risk_markers = (
@@ -293,6 +316,7 @@ class WorkflowNodes:
                 task_type=request.task_type,
                 risk_level=risk,
                 assignment=request.assignment,
+                skills=request.skills,
             )
             return {
                 "task": task.model_dump(mode="json"),
@@ -310,7 +334,12 @@ class WorkflowNodes:
                 prompt_name="planner",
                 logical_model=role.logical_model,
                 operation="plan",
-                payload={"task": state["task"]},
+                payload={
+                    "task": state["task"],
+                    "selected_skills": self.skills.planner_context(
+                        TaskSpec.model_validate(state["task"]).skills
+                    ),
+                },
                 output_model=Plan,
                 token_budget=role.token_budget,
                 cost_budget_usd=role.cost_budget_usd,
@@ -348,7 +377,12 @@ class WorkflowNodes:
                 return {
                     "artifacts": [artifact.model_dump(mode="json")],
                     "model_calls": [
-                        self._model_call("worker", response) for response in responses
+                        self._model_call(
+                            "worker",
+                            response,
+                            skill_ids=tuple(subtask.skill_ids),
+                        )
+                        for response in responses
                     ],
                     "tool_calls": tool_records,
                 }
@@ -395,20 +429,31 @@ class WorkflowNodes:
                 )
             loads[owner] = loads.get(owner, 0) + 1
             role = assignable[owner]
-            allowed_tools = [item for item in subtask.allowed_tools if item in role.allowed_tools]
             selected_functions = assignment.functions_by_agent.get(owner, [])
             assigned_function = (
                 needed_function
                 if not selected_functions or needed_function in selected_functions
                 else selected_functions[0]
             )
+            skill_context = self.skills.resolve(
+                task.skills,
+                subtask.skill_ids,
+                function=assigned_function,
+            )
+            requested_tools = (
+                list(skill_context.allowed_tools)
+                if skill_context.skill_ids
+                else subtask.allowed_tools
+            )
+            allowed_tools = [item for item in requested_tools if item in role.allowed_tools]
             rewritten.append(
                 subtask.model_copy(
                     update={
                         "worker_role": owner,
                         "assigned_function": assigned_function,
-                        "logical_model": role.logical_model,
+                        "logical_model": skill_context.logical_model or role.logical_model,
                         "allowed_tools": allowed_tools,
+                        "skill_ids": list(skill_context.skill_ids),
                     }
                 )
             )

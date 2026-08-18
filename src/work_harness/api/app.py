@@ -19,6 +19,7 @@ from work_harness.domain.enums import AgentFunction, RunStatus
 from work_harness.domain.models import RunResult, TaskRequest
 from work_harness.runtime import HarnessRuntime, build_runtime
 from work_harness.service import IdempotencyConflictError, RunManager, RunNotFoundError
+from work_harness.skills import SkillError
 
 
 class ApiModel(BaseModel):
@@ -71,6 +72,7 @@ def create_app(project_root: Path | str | None = None) -> FastAPI:
     from work_harness.config.loader import load_app_config
 
     preview = load_app_config(preview_config_root)
+
     async def authorize(x_api_key: Annotated[str | None, Header()] = None) -> None:
         config = state_holder.runtime.config.api
         if not config.auth_enabled:
@@ -95,6 +97,7 @@ def create_app(project_root: Path | str | None = None) -> FastAPI:
             "providers": await state_holder.runtime.model_gateway.health(),
             "checkpoint": state_holder.runtime.config.runtime.checkpoint.backend,
             "run_store": state_holder.runtime.run_store.backend,
+            "provider_compatible": state_holder.runtime.provider_compatibility.compatible,
         }
 
     @app.get("/v1/capabilities")
@@ -108,6 +111,23 @@ def create_app(project_root: Path | str | None = None) -> FastAPI:
         return {
             "logical_models": state_holder.runtime.model_gateway.logical_models,
             "tools": state_holder.runtime.tool_registry.names,
+            "tool_adapters": state_holder.runtime.tool_adapters.adapters,
+            "provider_adapters": state_holder.runtime.provider_adapters.adapters,
+            "provider_contract": {
+                "protocol_version": (state_holder.runtime.provider_compatibility.protocol_version),
+                "baseline_capabilities": (
+                    state_holder.runtime.provider_compatibility.baseline_capabilities
+                ),
+                "compatible": state_holder.runtime.provider_compatibility.compatible,
+            },
+            "providers": [
+                item.model_dump(mode="json")
+                for item in state_holder.runtime.provider_compatibility.providers
+            ],
+            "skills": [
+                item.model_dump(mode="json")
+                for item in state_holder.runtime.skill_registry.descriptors()
+            ],
             "task_types": ["general", "planning", "decision", "research", "code"],
             "allocation_modes": ["auto", "direct", "cross_functional"],
             "functions": [
@@ -133,7 +153,21 @@ def create_app(project_root: Path | str | None = None) -> FastAPI:
             run_id = await state_holder.runs.start(request)
         except IdempotencyConflictError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except SkillError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
         return RunAccepted(run_id=run_id, status_url=f"/v1/runs/{run_id}")
+
+    @app.get("/v1/compatibility")
+    async def compatibility() -> dict[str, Any]:
+        return {
+            "providers": state_holder.runtime.provider_compatibility.model_dump(mode="json"),
+            "provider_adapters": state_holder.runtime.provider_adapters.adapters,
+            "tool_adapters": state_holder.runtime.tool_adapters.adapters,
+            "skills": [
+                item.model_dump(mode="json")
+                for item in state_holder.runtime.skill_registry.descriptors()
+            ],
+        }
 
     @app.get("/v1/runs", response_model=RunIndexPage)
     async def list_runs(

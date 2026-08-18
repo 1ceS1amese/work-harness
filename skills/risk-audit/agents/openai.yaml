@@ -1,0 +1,4 @@
+interface:
+  display_name: "风险审计"
+  short_description: "独立检查安全、合规、质量与交付风险并输出可执行的控制建议"
+  default_prompt: "Use $risk-audit to review this task for security and delivery risks."

@@ -21,6 +21,7 @@ class OpenAICompatibleProvider:
     """Minimal Chat Completions adapter behind the project's stable provider contract."""
 
     capabilities = frozenset({"chat", "structured_output", "tool_calling"})
+    protocol_version = "1.0"
 
     def __init__(
         self,

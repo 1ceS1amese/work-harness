@@ -11,13 +11,23 @@ from langgraph.checkpoint.memory import InMemorySaver
 from work_harness.config.loader import load_app_config
 from work_harness.config.models import AppConfig
 from work_harness.llm.base import ModelProvider
+from work_harness.llm.compatibility import (
+    ProviderCompatibilityReport,
+    inspect_provider_compatibility,
+)
 from work_harness.llm.gateway import ModelGateway
-from work_harness.llm.mock import MockProvider
-from work_harness.llm.openai_compatible import OpenAICompatibleProvider
+from work_harness.llm.registry import (
+    ProviderAdapterRegistry,
+    build_default_provider_registry,
+)
 from work_harness.observability import TraceRecorder, configure_logging
 from work_harness.prompts import PromptRegistry
+from work_harness.skills import SkillRegistry
 from work_harness.storage import RunStore, build_run_store
-from work_harness.tools.builtin import EchoReadTool, WorkspaceReadTool
+from work_harness.tools.adapters import (
+    ToolAdapterRegistry,
+    build_default_tool_adapter_registry,
+)
 from work_harness.tools.gateway import ToolGateway
 from work_harness.tools.registry import ToolRegistry
 from work_harness.workflow.graph import build_root_graph
@@ -31,32 +41,58 @@ class HarnessRuntime:
     tool_gateway: ToolGateway
     tool_registry: ToolRegistry
     run_store: RunStore
+    skill_registry: SkillRegistry
+    provider_compatibility: ProviderCompatibilityReport
+    provider_adapters: ProviderAdapterRegistry
+    tool_adapters: ToolAdapterRegistry
 
 
-def _build_providers(config: AppConfig) -> dict[str, ModelProvider]:
+def _build_providers(
+    config: AppConfig,
+    adapters: ProviderAdapterRegistry,
+) -> dict[str, ModelProvider]:
     providers: dict[str, ModelProvider] = {}
     for name, provider_config in config.models.providers.items():
         if not provider_config.enabled:
             continue
-        if provider_config.adapter == "mock":
-            providers[name] = MockProvider()
-        elif provider_config.adapter == "openai_compatible":
-            providers[name] = OpenAICompatibleProvider(name, provider_config)
+        providers[name] = adapters.build(name, provider_config)
     return providers
 
 
-def _build_runtime(config: AppConfig, checkpointer: Any, run_store: RunStore) -> HarnessRuntime:
-    providers = _build_providers(config)
+def _build_runtime(
+    config: AppConfig,
+    checkpointer: Any,
+    run_store: RunStore,
+    provider_adapters: ProviderAdapterRegistry,
+    tool_adapters: ToolAdapterRegistry,
+) -> HarnessRuntime:
+    providers = _build_providers(config, provider_adapters)
+    provider_compatibility = inspect_provider_compatibility(config.models, providers)
+    if not provider_compatibility.compatible:
+        issues = [
+            f"{row.provider}: {', '.join(row.issues)}"
+            for row in provider_compatibility.providers
+            if not row.compatible
+        ]
+        raise ValueError(f"provider compatibility check failed: {'; '.join(issues)}")
     gateway = ModelGateway(config.models, providers, config.runtime)
     registry = ToolRegistry(config.tools)
-    registry.register(EchoReadTool())
-    registry.register(WorkspaceReadTool(config.project_root))
+    for tool_name in config.tools.tools:
+        registry.register(tool_adapters.build(tool_name, config.project_root))
     registry.validate_complete()
     tool_gateway = ToolGateway(
         registry,
         global_max_result_chars=config.runtime.max_tool_result_chars,
     )
     prompts = PromptRegistry(config.project_root / "prompts")
+    skill_registry = SkillRegistry(config.project_root / "skills")
+    skill_registry.load()
+    assignable_roles = [name for name, role in config.agents.agents.items() if role.assignable]
+    skill_registry.validate_compatibility(
+        config.models,
+        registry,
+        assignable_roles=assignable_roles,
+    )
     trace = TraceRecorder(enabled=config.runtime.trace.enabled)
     graph = build_root_graph(
         config=config,
@@ -64,6 +100,7 @@ def _build_runtime(config: AppConfig, checkpointer: Any, run_store: RunStore) ->
         prompts=prompts,
         trace=trace,
         tool_gateway=tool_gateway,
+        skills=skill_registry,
         checkpointer=checkpointer,
     )
     return HarnessRuntime(
@@ -73,6 +110,10 @@ def _build_runtime(config: AppConfig, checkpointer: Any, run_store: RunStore) ->
         tool_gateway=tool_gateway,
         tool_registry=registry,
         run_store=run_store,
+        skill_registry=skill_registry,
+        provider_compatibility=provider_compatibility,
+        provider_adapters=provider_adapters,
+        tool_adapters=tool_adapters,
     )
 
 
@@ -86,6 +127,8 @@ async def build_runtime(
     *,
     checkpoint_backend: str | None = None,
     run_store_backend: str | None = None,
+    provider_adapters: ProviderAdapterRegistry | None = None,
+    tool_adapters: ToolAdapterRegistry | None = None,
 ) -> AsyncIterator[HarnessRuntime]:
     config = load_app_config(project_root)
     configure_logging(config.runtime.trace.log_level)
@@ -99,9 +142,17 @@ async def build_runtime(
         backend=selected_run_store,
     )
     await run_store.initialize()
+    adapters = provider_adapters or build_default_provider_registry()
+    selected_tool_adapters = tool_adapters or build_default_tool_adapter_registry()
     try:
         if backend == "memory":
-            runtime = _build_runtime(config, InMemorySaver(), run_store)
+            runtime = _build_runtime(
+                config,
+                InMemorySaver(),
+                run_store,
+                adapters,
+                selected_tool_adapters,
+            )
             try:
                 yield runtime
             finally:
@@ -117,7 +168,13 @@ async def build_runtime(
             checkpoint_path = config.project_root / checkpoint_path
         checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
         async with AsyncSqliteSaver.from_conn_string(str(checkpoint_path)) as saver:
-            runtime = _build_runtime(config, saver, run_store)
+            runtime = _build_runtime(
+                config,
+                saver,
+                run_store,
+                adapters,
+                selected_tool_adapters,
+            )
             try:
                 yield runtime
             finally:

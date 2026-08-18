@@ -87,6 +87,14 @@ const functionLabels: Record<string, string> = {
           <el-tag effect="plain" :type="run.task.assignment.cross_review ? 'success' : 'info'">
             {{ run.task.assignment.cross_review ? '三维交叉复核' : '单维复核' }}
           </el-tag>
+          <el-tag
+            v-for="skill in run.task.skills ?? []"
+            :key="skill.skill_id"
+            effect="plain"
+            type="warning"
+          >
+            {{ skill.skill_id }} · {{ skill.provider || '自动 Provider' }}
+          </el-tag>
         </div>
       </section>
 
@@ -101,6 +109,7 @@ const functionLabels: Record<string, string> = {
           >
             <strong>{{ subtask.title }}</strong>
             <p>{{ subtask.description }}</p>
+            <small v-if="subtask.skill_ids?.length">Skill：{{ subtask.skill_ids.join('、') }}</small>
           </el-timeline-item>
         </el-timeline>
       </section>
@@ -143,6 +152,7 @@ const functionLabels: Record<string, string> = {
         <el-table :data="run.model_calls" size="small">
           <el-table-column prop="node" label="节点" min-width="100" />
           <el-table-column prop="model" label="模型" min-width="140" />
+          <el-table-column prop="provider" label="Provider" min-width="120" />
           <el-table-column prop="latency_ms" label="耗时(ms)" width="100" />
           <el-table-column prop="retries" label="重试" width="70" />
         </el-table>

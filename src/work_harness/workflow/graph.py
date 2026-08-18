@@ -10,6 +10,7 @@ from work_harness.domain.enums import DecisionAction, RunStatus
 from work_harness.llm.gateway import ModelGateway
 from work_harness.observability.trace import TraceRecorder
 from work_harness.prompts import PromptRegistry
+from work_harness.skills import SkillRegistry
 from work_harness.tools.gateway import ToolGateway
 from work_harness.workflow.nodes import WorkflowNodes
 from work_harness.workflow.state import GraphState, latest_artifacts
@@ -22,6 +23,7 @@ def build_root_graph(
     prompts: PromptRegistry,
     trace: TraceRecorder,
     tool_gateway: ToolGateway,
+    skills: SkillRegistry,
     checkpointer: Any,
 ) -> Any:
     nodes = WorkflowNodes(
@@ -30,6 +32,7 @@ def build_root_graph(
         prompts=prompts,
         trace=trace,
         tool_gateway=tool_gateway,
+        skills=skills,
     )
     builder = StateGraph(GraphState)
     builder.add_node("normalize", nodes.normalize)

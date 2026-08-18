@@ -1,0 +1,4 @@
+interface:
+  display_name: "创建 Provider Skill"
+  short_description: "创建兼容 Work Harness 的模块化 Skill 与 Provider 路由"
+  default_prompt: "Use $create-provider-skill to add a provider-routed skill to Work Harness."

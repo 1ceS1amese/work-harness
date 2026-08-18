@@ -1,0 +1,131 @@
+{
+  "$defs": {
+    "ReviewIssue": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Code",
+          "type": "string"
+        },
+        "severity": {
+          "$ref": "#/$defs/Severity"
+        },
+        "message": {
+          "maxLength": 4000,
+          "minLength": 1,
+          "title": "Message",
+          "type": "string"
+        },
+        "evidence": {
+          "anyOf": [
+            {
+              "maxLength": 4000,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Evidence"
+        },
+        "recommendation": {
+          "anyOf": [
+            {
+              "maxLength": 4000,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Recommendation"
+        }
+      },
+      "required": [
+        "code",
+        "severity",
+        "message"
+      ],
+      "title": "ReviewIssue",
+      "type": "object"
+    },
+    "ReviewVerdict": {
+      "enum": [
+        "pass",
+        "revise",
+        "reject"
+      ],
+      "title": "ReviewVerdict",
+      "type": "string"
+    },
+    "Severity": {
+      "enum": [
+        "info",
+        "warning",
+        "error",
+        "critical"
+      ],
+      "title": "Severity",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "review_id": {
+      "title": "Review Id",
+      "type": "string"
+    },
+    "artifact_id": {
+      "title": "Artifact Id",
+      "type": "string"
+    },
+    "artifact_version": {
+      "minimum": 1,
+      "title": "Artifact Version",
+      "type": "integer"
+    },
+    "reviewer": {
+      "title": "Reviewer",
+      "type": "string"
+    },
+    "dimension": {
+      "title": "Dimension",
+      "type": "string"
+    },
+    "verdict": {
+      "$ref": "#/$defs/ReviewVerdict"
+    },
+    "issues": {
+      "items": {
+        "$ref": "#/$defs/ReviewIssue"
+      },
+      "title": "Issues",
+      "type": "array"
+    },
+    "confidence": {
+      "maximum": 1,
+      "minimum": 0,
+      "title": "Confidence",
+      "type": "number"
+    },
+    "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+    }
+  },
+  "required": [
+    "artifact_id",
+    "artifact_version",
+    "reviewer",
+    "dimension",
+    "verdict",
+    "confidence"
+  ],
+  "title": "Review",
+  "type": "object"
+}

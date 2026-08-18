@@ -1,0 +1,44 @@
+schema_version: 1
+profile: local
+providers:
+  mock:
+    adapter: mock
+    enabled: true
+    capabilities: [chat, structured_output, tool_calling]
+    timeout_seconds: 5
+  compatible:
+    adapter: openai_compatible
+    enabled: false
+    base_url_env: MODEL_BASE_URL
+    api_key_env: MODEL_API_KEY
+    allowed_models: [configured-model]
+    capabilities: [chat, structured_output, tool_calling]
+    timeout_seconds: 60
+    allow_insecure_http: false
+    allow_private_network: false
+logical_models:
+  planner-strong:
+    required_capabilities: [chat, structured_output]
+    candidates:
+      - {provider: mock, model: mock-planner}
+      - {provider: compatible, model: configured-model}
+  worker-fast:
+    required_capabilities: [chat, structured_output]
+    candidates:
+      - {provider: mock, model: mock-worker}
+      - {provider: compatible, model: configured-model}
+  reviewer-independent:
+    required_capabilities: [chat, structured_output]
+    candidates:
+      - {provider: mock, model: mock-reviewer}
+      - {provider: compatible, model: configured-model}
+  judge-stable:
+    required_capabilities: [chat, structured_output]
+    candidates:
+      - {provider: mock, model: mock-judge}
+      - {provider: compatible, model: configured-model}
+  synthesizer-general:
+    required_capabilities: [chat]
+    candidates:
+      - {provider: mock, model: mock-synthesizer}
+      - {provider: compatible, model: configured-model}

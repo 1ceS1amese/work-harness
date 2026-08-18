@@ -1,0 +1,24 @@
+schema_version: 1
+tools:
+  echo_read:
+    version: "1.0.0"
+    description: Return supplied text for framework self-tests.
+    category: read
+    risk_level: low
+    allowed_roles: [worker-01, worker-02, worker-03, worker-04]
+    timeout_seconds: 3
+    max_result_chars: 1000
+    retryable: false
+    idempotent: true
+    requires_approval: false
+  workspace_read:
+    version: "1.0.0"
+    description: Read, list, or search bounded UTF-8 text inside the project workspace.
+    category: read
+    risk_level: low
+    allowed_roles: [worker-01, worker-02, worker-03, worker-04]
+    timeout_seconds: 5
+    max_result_chars: 8000
+    retryable: false
+    idempotent: true
+    requires_approval: false

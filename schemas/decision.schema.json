@@ -1,0 +1,62 @@
+{
+  "$defs": {
+    "DecisionAction": {
+      "enum": [
+        "approve",
+        "repair",
+        "request_human",
+        "fail"
+      ],
+      "title": "DecisionAction",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "decision_id": {
+      "title": "Decision Id",
+      "type": "string"
+    },
+    "action": {
+      "$ref": "#/$defs/DecisionAction"
+    },
+    "reasons": {
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1,
+      "title": "Reasons",
+      "type": "array"
+    },
+    "target_subtasks": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Target Subtasks",
+      "type": "array"
+    },
+    "human_prompt": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Human Prompt"
+    },
+    "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+    }
+  },
+  "required": [
+    "action",
+    "reasons"
+  ],
+  "title": "Decision",
+  "type": "object"
+}

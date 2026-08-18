@@ -1,0 +1,132 @@
+{
+  "$defs": {
+    "AgentFunction": {
+      "enum": [
+        "analysis",
+        "research",
+        "execution",
+        "risk"
+      ],
+      "title": "AgentFunction",
+      "type": "string"
+    },
+    "SubtaskSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "subtask_id": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Subtask Id",
+          "type": "string"
+        },
+        "title": {
+          "maxLength": 300,
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        },
+        "description": {
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Description",
+          "type": "string"
+        },
+        "dependencies": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Dependencies",
+          "type": "array"
+        },
+        "worker_role": {
+          "default": "worker-01",
+          "title": "Worker Role",
+          "type": "string"
+        },
+        "assigned_function": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AgentFunction"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "logical_model": {
+          "default": "worker-fast",
+          "title": "Logical Model",
+          "type": "string"
+        },
+        "allowed_tools": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Allowed Tools",
+          "type": "array"
+        },
+        "acceptance_criteria": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Acceptance Criteria",
+          "type": "array"
+        },
+        "token_budget": {
+          "default": 5000,
+          "minimum": 1,
+          "title": "Token Budget",
+          "type": "integer"
+        },
+        "cost_budget_usd": {
+          "default": 0.5,
+          "minimum": 0,
+          "title": "Cost Budget Usd",
+          "type": "number"
+        }
+      },
+      "required": [
+        "subtask_id",
+        "title",
+        "description",
+        "acceptance_criteria"
+      ],
+      "title": "SubtaskSpec",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "plan_id": {
+      "title": "Plan Id",
+      "type": "string"
+    },
+    "version": {
+      "default": 1,
+      "minimum": 1,
+      "title": "Version",
+      "type": "integer"
+    },
+    "subtasks": {
+      "items": {
+        "$ref": "#/$defs/SubtaskSpec"
+      },
+      "minItems": 1,
+      "title": "Subtasks",
+      "type": "array"
+    },
+    "rationale": {
+      "default": "",
+      "maxLength": 5000,
+      "title": "Rationale",
+      "type": "string"
+    }
+  },
+  "required": [
+    "subtasks"
+  ],
+  "title": "Plan",
+  "type": "object"
+}

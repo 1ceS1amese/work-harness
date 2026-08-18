@@ -1,0 +1,21 @@
+providers:
+  mock:
+    enabled: false
+  compatible:
+    enabled: true
+logical_models:
+  planner-strong:
+    candidates:
+      - {provider: compatible, model: configured-model}
+  worker-fast:
+    candidates:
+      - {provider: compatible, model: configured-model}
+  reviewer-independent:
+    candidates:
+      - {provider: compatible, model: configured-model}
+  judge-stable:
+    candidates:
+      - {provider: compatible, model: configured-model}
+  synthesizer-general:
+    candidates:
+      - {provider: compatible, model: configured-model}

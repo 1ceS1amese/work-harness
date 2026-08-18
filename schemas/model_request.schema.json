@@ -1,0 +1,167 @@
+{
+  "$defs": {
+    "MessageRole": {
+      "enum": [
+        "system",
+        "user",
+        "assistant",
+        "tool"
+      ],
+      "title": "MessageRole",
+      "type": "string"
+    },
+    "ModelMessage": {
+      "additionalProperties": false,
+      "properties": {
+        "role": {
+          "$ref": "#/$defs/MessageRole"
+        },
+        "content": {
+          "default": "",
+          "title": "Content",
+          "type": "string"
+        },
+        "tool_call_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tool Call Id"
+        },
+        "tool_calls": {
+          "anyOf": [
+            {
+              "items": {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tool Calls"
+        }
+      },
+      "required": [
+        "role"
+      ],
+      "title": "ModelMessage",
+      "type": "object"
+    },
+    "RiskLevel": {
+      "enum": [
+        "low",
+        "medium",
+        "high",
+        "critical"
+      ],
+      "title": "RiskLevel",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "run_id": {
+      "title": "Run Id",
+      "type": "string"
+    },
+    "trace_id": {
+      "title": "Trace Id",
+      "type": "string"
+    },
+    "node_name": {
+      "title": "Node Name",
+      "type": "string"
+    },
+    "agent_role": {
+      "title": "Agent Role",
+      "type": "string"
+    },
+    "logical_model": {
+      "title": "Logical Model",
+      "type": "string"
+    },
+    "messages": {
+      "items": {
+        "$ref": "#/$defs/ModelMessage"
+      },
+      "minItems": 1,
+      "title": "Messages",
+      "type": "array"
+    },
+    "required_capabilities": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Required Capabilities",
+      "type": "array",
+      "uniqueItems": true
+    },
+    "tools": {
+      "items": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "title": "Tools",
+      "type": "array"
+    },
+    "response_schema": {
+      "anyOf": [
+        {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Response Schema"
+    },
+    "timeout_seconds": {
+      "default": 60,
+      "exclusiveMinimum": 0,
+      "title": "Timeout Seconds",
+      "type": "number"
+    },
+    "token_budget": {
+      "default": 4000,
+      "minimum": 1,
+      "title": "Token Budget",
+      "type": "integer"
+    },
+    "cost_budget_usd": {
+      "default": 1.0,
+      "minimum": 0,
+      "title": "Cost Budget Usd",
+      "type": "number"
+    },
+    "risk_level": {
+      "$ref": "#/$defs/RiskLevel",
+      "default": "low"
+    },
+    "metadata": {
+      "additionalProperties": true,
+      "title": "Metadata",
+      "type": "object"
+    }
+  },
+  "required": [
+    "run_id",
+    "trace_id",
+    "node_name",
+    "agent_role",
+    "logical_model",
+    "messages"
+  ],
+  "title": "ModelRequest",
+  "type": "object"
+}

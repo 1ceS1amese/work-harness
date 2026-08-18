@@ -1,0 +1,28 @@
+schema_version: 1
+worker_max_concurrency: 4
+reviewer_max_concurrency: 3
+max_planned_subtasks: 4
+max_repair_rounds: 1
+max_node_steps: 10
+node_timeout_seconds: 60
+run_timeout_seconds: 300
+token_budget: 50000
+cost_budget_usd: 5.0
+max_artifact_chars: 20000
+max_tool_result_chars: 8000
+model_retry_attempts: 2
+recovery_enabled: true
+run_lease_seconds: 30
+heartbeat_interval_seconds: 10
+recovery_scan_interval_seconds: 10
+recovery_scan_limit: 200
+checkpoint:
+  backend: sqlite
+  path: var/checkpoints.sqlite
+run_store:
+  backend: sqlite
+  path: var/runs.sqlite
+trace:
+  enabled: true
+  sample_rate: 1.0
+  log_level: INFO

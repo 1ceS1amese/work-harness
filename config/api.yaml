@@ -1,0 +1,9 @@
+schema_version: 1
+host: 127.0.0.1
+port: 8000
+auth_enabled: false
+api_key_env: WORK_HARNESS_API_KEY
+request_max_bytes: 1048576
+rate_limit_per_minute: 60
+expose_docs: true
+

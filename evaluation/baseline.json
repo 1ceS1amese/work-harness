@@ -1,0 +1,21 @@
+{
+  "version": "framework-002",
+  "recorded_at": "2026-08-18",
+  "evaluation_scope": "mock_provider_workflow_contract",
+  "quality_claim": false,
+  "metrics": {
+    "case_count": 10,
+    "success_rate": 1.0,
+    "error_rate": 0.0,
+    "structured_parse_error_rate": 0.0,
+    "tool_call_accuracy": null,
+    "average_steps_proxy": 10.8,
+    "average_latency_ms": 18.8,
+    "p95_latency_ms": 23.0,
+    "total_input_tokens": 6912,
+    "total_output_tokens": 13824,
+    "total_estimated_cost_usd": 0.0,
+    "bad_case_count": 0
+  },
+  "note": "Deterministic Mock baseline for framework behavior only; it is not a model-quality claim."
+}

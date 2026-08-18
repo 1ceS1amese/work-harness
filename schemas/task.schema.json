@@ -1,0 +1,133 @@
+{
+  "$defs": {
+    "AgentAssignment": {
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "$ref": "#/$defs/AllocationMode",
+          "default": "auto"
+        },
+        "assignees": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 8,
+          "title": "Assignees",
+          "type": "array"
+        },
+        "functions_by_agent": {
+          "additionalProperties": {
+            "items": {
+              "$ref": "#/$defs/AgentFunction"
+            },
+            "type": "array"
+          },
+          "title": "Functions By Agent",
+          "type": "object"
+        },
+        "cross_review": {
+          "default": true,
+          "title": "Cross Review",
+          "type": "boolean"
+        }
+      },
+      "title": "AgentAssignment",
+      "type": "object"
+    },
+    "AgentFunction": {
+      "enum": [
+        "analysis",
+        "research",
+        "execution",
+        "risk"
+      ],
+      "title": "AgentFunction",
+      "type": "string"
+    },
+    "AllocationMode": {
+      "enum": [
+        "auto",
+        "direct",
+        "cross_functional"
+      ],
+      "title": "AllocationMode",
+      "type": "string"
+    },
+    "RiskLevel": {
+      "enum": [
+        "low",
+        "medium",
+        "high",
+        "critical"
+      ],
+      "title": "RiskLevel",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "task_id": {
+      "title": "Task Id",
+      "type": "string"
+    },
+    "goal": {
+      "maxLength": 20000,
+      "minLength": 1,
+      "title": "Goal",
+      "type": "string"
+    },
+    "context": {
+      "additionalProperties": true,
+      "title": "Context",
+      "type": "object"
+    },
+    "constraints": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Constraints",
+      "type": "array"
+    },
+    "expected_output": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Expected Output"
+    },
+    "task_type": {
+      "default": "general",
+      "title": "Task Type",
+      "type": "string"
+    },
+    "risk_level": {
+      "$ref": "#/$defs/RiskLevel",
+      "default": "low"
+    },
+    "assignment": {
+      "$ref": "#/$defs/AgentAssignment"
+    },
+    "ambiguities": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Ambiguities",
+      "type": "array"
+    },
+    "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+    }
+  },
+  "required": [
+    "goal"
+  ],
+  "title": "TaskSpec",
+  "type": "object"
+}

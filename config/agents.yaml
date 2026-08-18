@@ -1,0 +1,141 @@
+schema_version: 1
+agents:
+  normalizer:
+    version: "1.0.0"
+    responsibility: Normalize user input without solving the task.
+    display_name: 需求整理员
+    specialty: 输入规范化
+    logical_model: planner-strong
+    allowed_tools: []
+    input_schema: TaskRequest
+    output_schema: TaskSpec
+    max_steps: 1
+    timeout_seconds: 10
+    token_budget: 1500
+    cost_budget_usd: 0.10
+    reviewers: []
+    repairable: false
+  planner:
+    version: "1.0.0"
+    responsibility: Produce a bounded dependency-aware plan.
+    display_name: 任务协调员
+    specialty: 任务拆分与依赖编排
+    logical_model: planner-strong
+    allowed_tools: []
+    input_schema: TaskSpec
+    output_schema: Plan
+    max_steps: 2
+    timeout_seconds: 60
+    token_budget: 5000
+    cost_budget_usd: 0.50
+    reviewers: [constraint]
+    repairable: true
+  worker-01:
+    version: "1.1.0"
+    responsibility: Execute the function selected for this task and return a traceable artifact.
+    display_name: 智能成员一
+    specialty: 按任务选择功能
+    assignable: true
+    logical_model: worker-fast
+    allowed_tools: [echo_read, workspace_read]
+    input_schema: SubtaskSpec
+    output_schema: Artifact
+    max_steps: 8
+    timeout_seconds: 120
+    token_budget: 10000
+    cost_budget_usd: 1.00
+    reviewers: [fact, logic, constraint]
+    repairable: true
+  worker-02:
+    version: "1.1.0"
+    responsibility: Execute the function selected for this task and return a traceable artifact.
+    display_name: 智能成员二
+    specialty: 按任务选择功能
+    assignable: true
+    logical_model: worker-fast
+    allowed_tools: [echo_read, workspace_read]
+    input_schema: SubtaskSpec
+    output_schema: Artifact
+    max_steps: 8
+    timeout_seconds: 120
+    token_budget: 10000
+    cost_budget_usd: 1.00
+    reviewers: [fact, logic, constraint]
+    repairable: true
+  worker-03:
+    version: "1.1.0"
+    responsibility: Execute the function selected for this task and return a traceable artifact.
+    display_name: 智能成员三
+    specialty: 按任务选择功能
+    assignable: true
+    logical_model: worker-fast
+    allowed_tools: [echo_read, workspace_read]
+    input_schema: SubtaskSpec
+    output_schema: Artifact
+    max_steps: 8
+    timeout_seconds: 120
+    token_budget: 10000
+    cost_budget_usd: 1.00
+    reviewers: [fact, logic, constraint]
+    repairable: true
+  worker-04:
+    version: "1.1.0"
+    responsibility: Execute the function selected for this task and return a traceable artifact.
+    display_name: 智能成员四
+    specialty: 按任务选择功能
+    assignable: true
+    logical_model: worker-fast
+    allowed_tools: [echo_read, workspace_read]
+    input_schema: SubtaskSpec
+    output_schema: Artifact
+    max_steps: 8
+    timeout_seconds: 120
+    token_budget: 10000
+    cost_budget_usd: 1.00
+    reviewers: [fact, logic, constraint]
+    repairable: true
+  reviewer:
+    version: "1.0.0"
+    responsibility: Review an artifact independently without rewriting it.
+    display_name: 交叉复核组
+    specialty: 事实、逻辑与约束复核
+    logical_model: reviewer-independent
+    allowed_tools: []
+    input_schema: Artifact
+    output_schema: Review
+    max_steps: 2
+    timeout_seconds: 60
+    token_budget: 3000
+    cost_budget_usd: 0.30
+    reviewers: []
+    repairable: false
+  judge:
+    version: "1.0.0"
+    responsibility: Decide approve, targeted repair, human input, or failure.
+    display_name: 质量裁决员
+    specialty: 质量门禁与返工决策
+    logical_model: judge-stable
+    allowed_tools: []
+    input_schema: Review
+    output_schema: Decision
+    max_steps: 2
+    timeout_seconds: 60
+    token_budget: 3000
+    cost_budget_usd: 0.30
+    reviewers: []
+    repairable: false
+  synthesizer:
+    version: "1.0.0"
+    responsibility: Compose only approved artifacts into the final answer.
+    display_name: 成果汇总员
+    specialty: 审批后结果整合
+    logical_model: synthesizer-general
+    allowed_tools: []
+    input_schema: Artifact
+    output_schema: RunResult
+    max_steps: 2
+    timeout_seconds: 60
+    token_budget: 6000
+    cost_budget_usd: 0.60
+    reviewers: [constraint]
+    repairable: true

@@ -1,5 +1,9 @@
 # Work Harness
 
+**Language / 语言:** English | [简体中文](README.zh-CN.md)
+
+[![CI](https://github.com/1ceS1amese/work-harness/actions/workflows/ci.yml/badge.svg)](https://github.com/1ceS1amese/work-harness/actions/workflows/ci.yml)
+[![GitHub Release](https://img.shields.io/github/v/release/1ceS1amese/work-harness?display_name=tag&sort=semver)](https://github.com/1ceS1amese/work-harness/releases/latest)
 [![standard-readme compliant](https://img.shields.io/badge/readme%20style-standard-brightgreen.svg?style=flat-square)](https://github.com/RichardLitt/standard-readme)
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg?style=flat-square)](LICENSE)
 [![python: 3.11+](https://img.shields.io/badge/python-3.11%2B-3776AB.svg?style=flat-square)](pyproject.toml)
@@ -14,7 +18,7 @@ root agent and every assignable child agent can have independent Provider and mo
 
 The current release is alpha software. It is usable for local development, contract testing,
 single-instance deployment, and manual real-model evaluation. It is not yet a multi-tenant or
-horizontally scalable production service. [简体中文](README.zh-CN.md)
+horizontally scalable production service.
 
 ## Table of Contents
 
@@ -99,7 +103,8 @@ uv run work-harness serve
 ### GitHub Release wheel
 
 Release wheels contain the backend and built-in runtime configuration, prompts, schemas, and
-Skills. The browser UI is distributed in the container image and source checkout.
+Skills. Download the wheel from the [latest GitHub Release](https://github.com/1ceS1amese/work-harness/releases/latest).
+The browser UI is distributed in the container image and source checkout.
 
 ```bash
 python -m pip install work_harness-0.1.0-py3-none-any.whl

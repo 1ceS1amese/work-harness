@@ -1,5 +1,9 @@
 # Work Harness
 
+**Language / 语言：** [English](README.md) | 简体中文
+
+[![CI](https://github.com/1ceS1amese/work-harness/actions/workflows/ci.yml/badge.svg)](https://github.com/1ceS1amese/work-harness/actions/workflows/ci.yml)
+[![GitHub Release](https://img.shields.io/github/v/release/1ceS1amese/work-harness?display_name=tag&sort=semver)](https://github.com/1ceS1amese/work-harness/releases/latest)
 [![standard-readme compliant](https://img.shields.io/badge/readme%20style-standard-brightgreen.svg?style=flat-square)](https://github.com/RichardLitt/standard-readme)
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg?style=flat-square)](LICENSE)
 [![python: 3.11+](https://img.shields.io/badge/python-3.11%2B-3776AB.svg?style=flat-square)](pyproject.toml)
@@ -15,7 +19,7 @@ DeepSeek 方言均可通过 Chat Completions 或 Responses 接入；主 Agent �
 分别选择 Provider 和模型路由。
 
 当前版本是 Alpha，适合本地开发、协议测试、单实例部署和手动真实模型验证；暂不适合作为
-多租户或横向扩容的生产服务。[English](README.md)
+多租户或横向扩容的生产服务。
 
 ## 目录
 
@@ -95,8 +99,9 @@ uv run work-harness serve
 
 ### GitHub Release wheel
 
-发布 wheel 包含后端以及内置配置、Prompt、Schema 和 Skill。浏览器 UI 通过容器镜像和源码
-分发。
+发布 wheel 包含后端以及内置配置、Prompt、Schema 和 Skill，可从
+[最新 GitHub Release](https://github.com/1ceS1amese/work-harness/releases/latest) 下载。浏览器 UI
+通过容器镜像和源码分发。
 
 ```bash
 python -m pip install work_harness-0.1.0-py3-none-any.whl

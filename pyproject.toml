@@ -42,6 +42,13 @@ dependencies = [
   "uvicorn>=0.35,<1",
 ]
 
+[project.urls]
+Homepage = "https://github.com/1ceS1amese/work-harness"
+Documentation = "https://github.com/1ceS1amese/work-harness#readme"
+Repository = "https://github.com/1ceS1amese/work-harness.git"
+Issues = "https://github.com/1ceS1amese/work-harness/issues"
+Changelog = "https://github.com/1ceS1amese/work-harness/blob/main/CHANGELOG.md"
+
 [project.optional-dependencies]
 dev = [
   "pytest>=8.4,<10",

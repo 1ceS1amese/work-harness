@@ -67,6 +67,17 @@ Provider 难以替换、部分失败难以定位或恢复。Work Harness 将这�
 推荐使用 Docker Engine 24+ 和 Docker Compose v2.24+ 部署。源码开发需要 Python 3.11+、
 [uv](https://docs.astral.sh/uv/)、Node.js 22+ 与 npm。
 
+### Windows 单文件版
+
+从[最新 GitHub Release](https://github.com/1ceS1amese/work-harness/releases/latest) 下载
+`work-harness.exe` 和对应 `.sha256` 文件，校验后双击即可。EXE 已包含后端、浏览器 UI、内置
+配置、Prompt、Schema 和 Skill，目标电脑无需安装 Python 或 Node.js。
+
+桌面启动器只监听 `127.0.0.1`，会自动打开浏览器，并把 Checkpoint、运行记录和 Provider
+Profile 持久化到 `%LOCALAPPDATA%\WorkHarness`。传入 `work-harness.exe check-config` 等命令时
+可直接使用 CLI。校验方式、模型环境变量、自定义数据目录和源码构建说明见
+[Windows 单文件版指南](docs/windows-executable.md)。
+
 ### Docker Compose
 
 在仓库检出目录运行：
@@ -104,7 +115,7 @@ uv run work-harness serve
 通过容器镜像和源码分发。
 
 ```bash
-python -m pip install work_harness-0.1.0-py3-none-any.whl
+python -m pip install work_harness-0.2.0-py3-none-any.whl
 work-harness check-config
 work-harness serve --host 127.0.0.1 --port 8000
 ```
@@ -232,13 +243,14 @@ Provider 声明、适配器行为、逻辑路由或 Skill 要求不一致时，�
 
 ## 项目状态
 
-版本 `0.1.0` 当前包括：
+版本 `0.2.0` 当前包括：
 
-- 56 个后端测试与 13 个前端测试；
+- 61 个后端测试与 13 个前端测试；
 - 10/10 的确定性 Mock 工作流评测；
 - 可持久化的 Provider Profile 与按 Agent 划分的模型路由；
 - 基于租约和心跳的单实例重启恢复；
 - 一个只读工作区 Tool 与两个可执行示例 Skill；
+- 一个将持久化数据置于包外的 Windows x64 单文件 EXE；
 - Compose 部署、可选 Caddy HTTPS、存活检查与一致性 SQLite 备份。
 
 仓库不会包含真实 Provider 密钥。多实例存储、可靠任务队列、服务端会话、组织身份和业务 Tool

@@ -1,8 +1,8 @@
 # Work Harness 当前开发进度与接续报告（框架完善后）
 
-> 报告日期：2026-08-18  
+> 报告日期：2026-08-19
 > 项目目录：`/home/s1amese/work-harness`  
-> 当前阶段：本地框架闭环、Provider 兼容合同、模块化 Skill、单实例容器部署与 GitHub 开源发布链已完成；真实模型验收、业务系统工具和多实例生产基础设施待接入
+> 当前阶段：本地框架闭环、Provider 兼容合同、模块化 Skill、Windows 单文件封装、单实例容器部署与 GitHub 开源发布链已完成；真实模型验收、业务系统工具和多实例生产基础设施待接入
 
 ## 1. 结论摘要
 
@@ -111,12 +111,13 @@ Normalize
 | Vue 群聊式前端 | 已完成 | 创建任务、Skill/Provider 选择、Provider 配置与路由管理、状态流、恢复/取消、详情和会话本地保存 |
 | 异常运行恢复 | 已完成单实例闭环 | RunStore 租约、心跳、启动扫描；只从已有 Checkpoint 续跑 |
 | 实时流式推送 | 已完成状态流 | SSE 发送运行快照，前端断线后使用查询接口补偿 |
-| 自动化测试 | 已完成扩展集 | 后端 56 项、前端 13 项通过 |
+| 自动化测试 | 已完成扩展集 | 后端 61 项、前端 13 项通过 |
 | 评估框架 | 已完成扩展集 | 10 个 Mock 契约用例通过，不代表真实任务质量 |
 | 身份、租户、限流 | 未完成 | 只具备本地/API 鉴权配置边界，不是完整生产安全方案 |
 | 多实例与任务队列 | 未完成 | 当前 SQLite/进程内并发适合单实例开发环境 |
 | Docker Compose 单实例部署 | 已实现，待目标机实构建 | 多阶段镜像、非 root/只读运行、持久化卷、健康检查、在线备份、日志轮转及可选 Caddy HTTPS；Compose 静态校验通过 |
-| GitHub 开源发布链 | 已完成 | Standard Readme 中英文入口、MIT、社区治理文件、Issue/PR 模板、Dependabot、CI、Release wheel/sdist、双架构 GHCR 与构建来源证明 |
+| Windows 单文件封装 | 已完成 | PyInstaller one-file EXE 内置后端、前端和运行资源；可写 SQLite 位于 `%LOCALAPPDATA%`，双击启动并自动打开浏览器 |
+| GitHub 开源发布链 | 已完成 | Standard Readme 中英文入口、MIT、社区治理文件、Issue/PR 模板、Dependabot、CI、Release wheel/sdist/Windows EXE、双架构 GHCR 与构建来源证明 |
 | Git 版本基线 | 已完成 | `main` 分支已有可回滚基线提交，本轮兼容性改造可独立审查 |
 
 ## 5. 多 Agent 编排当前实现
@@ -288,7 +289,7 @@ Tool Handler 也改为由 `ToolAdapterRegistry` 组装，外部包可使用 `wor
 
 Prompt 应继续通过集中配置或注册机制管理，并记录版本。任何真实模型调优都应与评估集绑定，不能只依据少量手工对话判断质量提升。
 
-## 10. 2026-08-18 验证基线
+## 10. 2026-08-19 验证基线
 
 本报告生成前完成了下列验证：
 
@@ -297,7 +298,8 @@ Prompt 应继续通过集中配置或注册机制管理，并记录版本。任�
 | 配置检查 | `uv run work-harness check-config` | 通过；本地配置、Agent、模型角色、工具和 SQLite 存储加载正常 |
 | Python 静态检查 | `uv run ruff check src tests scripts` | 通过，无检查错误 |
 | Provider/Skill 兼容检查 | `uv run work-harness check-compatibility` | 通过；2 个启用 Provider 等能力，2 个运行时 Skill 均有可用 Provider |
-| 后端测试 | `uv run pytest` | 56 项通过，包含包内运行资源、无密钥值暂存、Provider 持久化、双协议、多轮 Tool Call、逐 Agent 路由、部署鉴权、能力全等和 Skill 组合 |
+| 后端测试 | `uv run pytest` | 61 项通过，包含冻结资源定位、应用数据目录、包内运行资源、无密钥值暂存、Provider 持久化、双协议、多轮 Tool Call、逐 Agent 路由、部署鉴权、能力全等和 Skill 组合 |
+| 单文件封装 | `pyinstaller packaging/work-harness.spec` | Linux 同构 one-file 构建用于本地验证；Windows x64 正式构建由 GitHub Actions 原生 Windows runner 完成 |
 | 基础评估 | `uv run work-harness eval` | 10/10 契约检查通过，错误率 0，平均延迟约 17.4 ms |
 | 前端类型检查 | `npm run type-check` | 通过 |
 | 前端测试 | `npm run test -- --run` | 5 个测试文件、13 项测试全部通过，包含 API Key 请求头与鉴权 SSE |
@@ -393,7 +395,7 @@ quality_claim: false
 4. 运行配置检查、后端测试、前端测试和构建。
 5. 初始化 Git，提交当前基线。
 
-完成标准：后端 56 项测试和前端 13 项测试通过，10/10 Mock 契约评估通过，生产构建成功，Git 工作区干净。
+完成标准：后端 61 项测试和前端 13 项测试通过，10/10 Mock 契约评估通过，生产构建成功，Git 工作区干净。
 
 ### 阶段 1：接入一个真实模型并建立质量基线
 

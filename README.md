@@ -69,6 +69,19 @@ For the recommended container installation, install Docker Engine 24+ and Docker
 For source development, install Python 3.11+, [uv](https://docs.astral.sh/uv/), Node.js 22+, and
 npm.
 
+### Windows executable
+
+Download `work-harness.exe` and its `.sha256` file from the
+[latest GitHub Release](https://github.com/1ceS1amese/work-harness/releases/latest), verify the
+hash, and double-click the executable. It contains the backend, browser UI, built-in configuration,
+prompts, schemas, and Skills; Python and Node.js are not required on the target machine.
+
+The desktop launcher listens only on `127.0.0.1`, opens the browser automatically, and persists
+checkpoints, runs, and Provider Profiles under `%LOCALAPPDATA%\WorkHarness`. Pass a CLI command such
+as `work-harness.exe check-config` to use it without the desktop launcher. See the
+[Windows executable guide](docs/windows-executable.md) for verification, model environment
+variables, custom data paths, and source builds.
+
 ### Docker Compose
 
 From a repository checkout:
@@ -107,7 +120,7 @@ Skills. Download the wheel from the [latest GitHub Release](https://github.com/1
 The browser UI is distributed in the container image and source checkout.
 
 ```bash
-python -m pip install work_harness-0.1.0-py3-none-any.whl
+python -m pip install work_harness-0.2.0-py3-none-any.whl
 work-harness check-config
 work-harness serve --host 127.0.0.1 --port 8000
 ```
@@ -240,13 +253,14 @@ host. Do not use `docker compose down -v` unless you explicitly intend to delete
 
 ## Project Status
 
-Version `0.1.0` currently provides:
+Version `0.2.0` currently provides:
 
-- 56 backend tests and 13 frontend tests;
+- 61 backend tests and 13 frontend tests;
 - a 10/10 deterministic Mock workflow evaluation;
 - durable Provider Profiles and per-agent model routes;
 - single-instance restart recovery with leases and heartbeats;
 - a read-only workspace Tool and two executable example Skills;
+- a self-contained Windows x64 executable with external durable state;
 - Compose deployment, optional Caddy HTTPS, liveness checks, and consistent SQLite backups.
 
 Real-provider credentials are intentionally not included. Multi-instance storage, a reliable task

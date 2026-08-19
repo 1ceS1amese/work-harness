@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -77,7 +78,12 @@ async def _run_task(args: argparse.Namespace) -> int:
 async def _run_eval(args: argparse.Namespace) -> int:
     root = args.project_root.resolve()
     cases = args.cases or root / "evaluation" / "eval_cases.jsonl"
-    output = args.output or root / "evaluation" / "reports" / "latest.json"
+    configured_output = os.getenv("WORK_HARNESS_EVALUATION_OUTPUT", "").strip()
+    output = args.output or (
+        Path(configured_output)
+        if configured_output
+        else root / "evaluation" / "reports" / "latest.json"
+    )
     async with build_runtime(root, checkpoint_backend="memory") as runtime:
         report = await run_evaluation(runtime, cases)
     save_report(report, output)
@@ -133,7 +139,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "export-schemas":
         from work_harness.schema_export import export_schemas
 
-        exported = export_schemas(args.project_root / "schemas")
+        configured_output = os.getenv("WORK_HARNESS_SCHEMA_OUTPUT", "").strip()
+        output = Path(configured_output) if configured_output else args.project_root / "schemas"
+        exported = export_schemas(output)
         print(json.dumps([str(path) for path in exported], ensure_ascii=False, indent=2))
         return 0
     if args.command == "run":

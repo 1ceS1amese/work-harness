@@ -13,6 +13,22 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - A production-grade shared database and task queue for multi-instance deployments.
 - Server-side conversations, tenant isolation, and organization identity integration.
 
+## 0.2.0 - 2026-08-19
+
+### Added
+
+- A Windows x64 single-file executable containing the API, browser workbench, runtime
+  configuration, prompts, schemas, evaluation cases, and built-in Skills.
+- A desktop launcher that opens the local workbench and stores checkpoints, runs, logs, and
+  Provider Profiles outside the temporary executable bundle.
+- Reproducible PyInstaller packaging, a PowerShell build command, SHA-256 output, artifact
+  attestation, and automatic executable attachment to GitHub Releases.
+
+### Changed
+
+- Frozen builds resolve read-only runtime resources from their bundle while respecting explicit
+  project roots and external persistence-path overrides.
+
 ## 0.1.0 - 2026-08-18
 
 ### Added

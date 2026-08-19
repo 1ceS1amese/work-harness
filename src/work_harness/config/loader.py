@@ -6,6 +6,7 @@ from typing import Any
 
 import yaml
 
+from work_harness.app_paths import frozen_bundle_root
 from work_harness.config.models import (
     AgentsConfig,
     ApiConfig,
@@ -17,6 +18,9 @@ from work_harness.config.models import (
 
 
 def default_project_root() -> Path:
+    bundle_root = frozen_bundle_root()
+    if bundle_root and (bundle_root / "config" / "runtime.yaml").is_file():
+        return bundle_root
     source_root = Path(__file__).resolve().parents[3]
     package_root = Path(__file__).resolve().parents[1]
     candidates = (source_root, Path.cwd(), package_root / "_runtime")

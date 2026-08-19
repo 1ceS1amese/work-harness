@@ -15,6 +15,7 @@ from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict
 
+from work_harness import __version__
 from work_harness.config.models import AppConfig, ProviderConfig
 from work_harness.domain.enums import AgentFunction, RunStatus
 from work_harness.domain.models import RunResult, TaskRequest
@@ -124,7 +125,7 @@ def create_app(project_root: Path | str | None = None) -> FastAPI:
 
     app = FastAPI(
         title="Work Harness API",
-        version="0.1.0",
+        version=__version__,
         docs_url="/docs" if preview.api.expose_docs else None,
         redoc_url=None,
         lifespan=lifespan,

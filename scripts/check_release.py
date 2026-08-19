@@ -25,7 +25,12 @@ REQUIRED_FILES = (
     ".github/pull_request_template.md",
     ".github/workflows/ci.yml",
     ".github/workflows/release.yml",
+    ".github/workflows/windows-exe.yml",
     ".github/dependabot.yml",
+    "docs/windows-executable.md",
+    "packaging/work-harness.spec",
+    "packaging/windows-version-info.txt",
+    "scripts/build_windows.ps1",
 )
 
 README_CONTRACTS = {

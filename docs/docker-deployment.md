@@ -64,7 +64,7 @@ WORK_HARNESS_PORT=8000
 `linux/arm64` GHCR 镜像。复制页面上的完整版本化镜像引用，写入 `.env`：
 
 ```dotenv
-WORK_HARNESS_IMAGE=ghcr.io/<owner>/<repository>:0.1.0
+WORK_HARNESS_IMAGE=ghcr.io/<owner>/<repository>:0.2.0
 ```
 
 然后执行：
@@ -251,7 +251,7 @@ backups/work-harness-YYYYMMDDTHHMMSSZ/
 自行发布到其他 Registry 时，建议使用不可变版本标签：
 
 ```dotenv
-WORK_HARNESS_IMAGE=registry.example.com/team/work-harness:0.1.0
+WORK_HARNESS_IMAGE=registry.example.com/team/work-harness:0.2.0
 ```
 
 构建后推送：

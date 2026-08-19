@@ -81,3 +81,46 @@ def test_tool_definitions_are_limited_by_role(gateway: ToolGateway) -> None:
     assert function["name"] == "workspace_read"
     with pytest.raises(ValueError):
         gateway.definitions(role="planner", names=["workspace_read"])
+
+
+@pytest.mark.asyncio
+async def test_idempotent_tool_results_are_cached_per_run() -> None:
+    config = load_app_config(PROJECT_ROOT)
+    registry = ToolRegistry(config.tools)
+    registry.register(EchoReadTool())
+    registry.register(WorkspaceReadTool(PROJECT_ROOT))
+    registry.validate_complete()
+    cached_gateway = ToolGateway(registry, cache_max_entries=4)
+
+    first = await cached_gateway.execute(
+        run_id="run_cached",
+        role="worker-01",
+        tool_name="echo_read",
+        arguments={"text": "stable"},
+    )
+    repeated = await cached_gateway.execute(
+        run_id="run_cached",
+        role="worker-01",
+        tool_name="echo_read",
+        arguments={"text": "stable"},
+    )
+    other_run = await cached_gateway.execute(
+        run_id="run_other",
+        role="worker-01",
+        tool_name="echo_read",
+        arguments={"text": "stable"},
+    )
+
+    assert first.cache_hit is False
+    assert repeated.cache_hit is True
+    assert repeated.output == first.output
+    assert other_run.cache_hit is False
+
+    await cached_gateway.clear_run("run_cached")
+    after_clear = await cached_gateway.execute(
+        run_id="run_cached",
+        role="worker-01",
+        tool_name="echo_read",
+        arguments={"text": "stable"},
+    )
+    assert after_clear.cache_hit is False

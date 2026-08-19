@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { RunResult } from '../types'
+import { functionLabel, logicalModelLabel, nodeLabel, taskTypeLabel } from './labels'
 import { getRunStage, resultMessage } from './run'
 
 function makeRun(overrides: Partial<RunResult> = {}): RunResult {
@@ -23,10 +24,17 @@ function makeRun(overrides: Partial<RunResult> = {}): RunResult {
 }
 
 describe('run progress mapping', () => {
+  it('uses conversational Chinese for internal task and agent identifiers', () => {
+    expect(nodeLabel('plan')).toBe('安排分工')
+    expect(functionLabel('analysis')).toBe('梳理思路')
+    expect(taskTypeLabel('planning')).toBe('安排计划')
+    expect(logicalModelLabel('planner-strong')).toBe('安排分工（细致）')
+  })
+
   it('maps an unnormalized run to the first stage', () => {
     expect(getRunStage(makeRun())).toEqual({
-      label: '理解任务',
-      description: '正在规范化目标与约束…',
+      label: '正在看你的消息',
+      description: '先把你想做的事和需要注意的地方捋清楚…',
       progress: 10,
     })
   })

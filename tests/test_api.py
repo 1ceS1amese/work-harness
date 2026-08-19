@@ -280,3 +280,29 @@ async def test_secure_profile_protects_api_but_exposes_liveness(
                 "/health", headers={"X-API-Key": "deployment-secret"}
             )
             assert authenticated.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_api_enforces_body_and_rate_limits(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv(
+        "WORK_HARNESS_CHECKPOINT_PATH", str(tmp_path / "guard-checkpoint.sqlite")
+    )
+    monkeypatch.setenv("WORK_HARNESS_RUN_STORE_PATH", str(tmp_path / "guard-runs.sqlite"))
+    monkeypatch.setenv(
+        "WORK_HARNESS_PROVIDER_STORE_PATH", str(tmp_path / "guard-providers.sqlite")
+    )
+    app = create_app(PROJECT_ROOT)
+    transport = httpx.ASGITransport(app=app)
+    async with app.router.lifespan_context(app):
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            too_large = await client.post(
+                "/v1/runs",
+                content=b"{}",
+                headers={"Content-Length": str(1_048_577)},
+            )
+            assert too_large.status_code == 413
+
+            responses = [await client.get("/v1/capabilities") for _ in range(61)]
+            assert responses[-2].status_code == 200
+            assert responses[-1].status_code == 429
+            assert responses[-1].headers["retry-after"]

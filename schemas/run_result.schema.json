@@ -798,6 +798,11 @@
           "minimum": 0,
           "title": "Duration Ms",
           "type": "integer"
+        },
+        "cache_hit": {
+          "default": false,
+          "title": "Cache Hit",
+          "type": "boolean"
         }
       },
       "required": [

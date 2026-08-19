@@ -120,7 +120,7 @@ Skills. Download the wheel from the [latest GitHub Release](https://github.com/1
 The browser UI is distributed in the container image and source checkout.
 
 ```bash
-python -m pip install work_harness-0.2.0-py3-none-any.whl
+python -m pip install work_harness-0.2.1-py3-none-any.whl
 work-harness check-config
 work-harness serve --host 127.0.0.1 --port 8000
 ```
@@ -198,7 +198,8 @@ Normalize → Plan → Worker → Validate → Review → Judge
 Four homogeneous workers share the same contracts, budgets, and tool permissions. Their behavior
 changes through per-task functions and routes, not permanent professions. See the
 [architecture decisions](docs/architecture_decisions.md), [persistence contract](docs/persistence.md),
-and [security boundary](docs/security_boundary.md).
+and [security boundary](docs/security_boundary.md). Backend scheduling, adaptive review, and the
+repeatable benchmark are documented in [backend performance](docs/backend-performance.md).
 
 ## Provider and Skill Compatibility
 
@@ -253,9 +254,13 @@ host. Do not use `docker compose down -v` unless you explicitly intend to delete
 
 ## Project Status
 
-Version `0.2.0` currently provides:
+Version `0.2.1` currently provides:
 
-- 61 backend tests and 13 frontend tests;
+- 66 backend tests and 14 frontend tests;
+- adaptive review that keeps three-dimensional checks for high-risk work while reducing the
+  deterministic low-risk workflow from 11 to 7 model calls;
+- event-driven SSE snapshots, bounded run/Provider concurrency, and run-scoped idempotent Tool
+  caching;
 - a 10/10 deterministic Mock workflow evaluation;
 - durable Provider Profiles and per-agent model routes;
 - single-instance restart recovery with leases and heartbeats;

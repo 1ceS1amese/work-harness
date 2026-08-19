@@ -266,6 +266,7 @@ class WorkflowNodes:
                             output_summary=execution.output_summary,
                             truncated=execution.truncated,
                             duration_ms=execution.duration_ms,
+                            cache_hit=execution.cache_hit,
                         ).model_dump(mode="json")
                     )
                     messages.append(

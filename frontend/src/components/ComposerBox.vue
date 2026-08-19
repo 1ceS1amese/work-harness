@@ -11,6 +11,13 @@ import type {
   SkillDescriptor,
   SkillSelection,
 } from '../types'
+import {
+  functionDescription,
+  functionLabel,
+  skillDescription,
+  skillLabel,
+  taskTypeLabel,
+} from '../utils/labels'
 
 const content = defineModel<string>({ required: true })
 const taskType = defineModel<string>('taskType', { required: true })
@@ -102,7 +109,7 @@ function setSkillProvider(skillId: string, provider: string): void {
   <footer class="composer-wrap">
     <div class="composer">
       <div class="assignment-strip">
-        <span class="assignment-label"><UserFilled /> 本轮成员</span>
+        <span class="assignment-label"><UserFilled /> 这次一起做</span>
         <button
           v-for="agent in selectedAgents"
           :key="agent.id"
@@ -115,15 +122,15 @@ function setSkillProvider(skillId: string, provider: string): void {
         </button>
         <el-popover placement="top-start" :width="360" trigger="click">
           <template #reference>
-            <button class="member-picker-trigger" type="button" aria-label="管理协作成员">
-              <Plus /> 管理成员
+            <button class="member-picker-trigger" type="button" aria-label="选择群成员">
+              <Plus /> 叫人一起做
             </button>
           </template>
           <div class="agent-picker">
             <div class="agent-picker-heading">
               <div>
-                <strong>选择可指派成员</strong>
-                <p>点击成员加入本轮任务；点击已选标签可快速指派。</p>
+                <strong>这次想让谁一起做？</strong>
+                <p>点一下就能加入。选好后，还可以告诉每个人更适合做哪部分。</p>
               </div>
               <el-switch
                 v-model="crossReview"
@@ -143,7 +150,7 @@ function setSkillProvider(skillId: string, provider: string): void {
                 <i>{{ agent.display_name.slice(0, 1) }}</i>
                 <span>
                   <strong>{{ agent.display_name }}</strong>
-                  <small>{{ agent.specialty || agent.responsibility }}</small>
+                  <small>和其他成员一样，可以按你的安排做不同的事</small>
                 </span>
                 <b>{{ selectedAgentIds.includes(agent.id) ? '已加入' : '加入' }}</b>
               </button>
@@ -153,10 +160,10 @@ function setSkillProvider(skillId: string, provider: string): void {
                   :key="item.id"
                   type="button"
                   :class="{ active: functionsByAgent[agent.id]?.includes(item.id) }"
-                  :title="item.description"
+                  :title="functionDescription(item.id, item.description)"
                   @click="toggleFunction(agent.id, item.id)"
                 >
-                  {{ item.display_name }}
+                  {{ functionLabel(item.id) }}
                 </button>
               </div>
             </div>
@@ -164,15 +171,15 @@ function setSkillProvider(skillId: string, provider: string): void {
         </el-popover>
         <el-popover v-if="skills.length" placement="top-start" :width="390" trigger="click">
           <template #reference>
-            <button class="member-picker-trigger" type="button" aria-label="选择技能和 Provider">
-              技能 {{ skillSelections.length ? `(${skillSelections.length})` : '' }}
+            <button class="member-picker-trigger" type="button" aria-label="选择能力模块和模型服务">
+              能力 {{ skillSelections.length ? `(${skillSelections.length})` : '' }}
             </button>
           </template>
           <div class="agent-picker skill-picker">
             <div class="agent-picker-heading">
               <div>
-                <strong>模块化技能</strong>
-                <p>选择任务能力；Provider 可自动路由或手动固定。</p>
+                <strong>还需要哪些帮手能力？</strong>
+                <p>按需打开就好。模型服务可以让系统自动挑，也可以由你指定。</p>
               </div>
             </div>
             <div
@@ -183,8 +190,8 @@ function setSkillProvider(skillId: string, provider: string): void {
             >
               <button class="agent-picker-member" type="button" @click="toggleSkill(skill)">
                 <span>
-                  <strong>{{ skill.id }}</strong>
-                  <small>{{ skill.description }}</small>
+                  <strong>{{ skillLabel(skill.id) }}</strong>
+                  <small>{{ skillDescription(skill.id, skill.description) }}</small>
                 </span>
                 <b>{{ selectedSkill(skill.id) ? '已启用' : '启用' }}</b>
               </button>
@@ -192,10 +199,10 @@ function setSkillProvider(skillId: string, provider: string): void {
                 v-if="selectedSkill(skill.id)"
                 :model-value="selectedSkill(skill.id)?.provider ?? ''"
                 size="small"
-                aria-label="Skill Provider"
+                aria-label="能力模块使用的模型服务"
                 @update:model-value="(value: string) => setSkillProvider(skill.id, value)"
               >
-                <el-option label="自动选择 Provider" value="" />
+                <el-option label="让系统自动选择模型服务" value="" />
                 <el-option
                   v-for="provider in skill.available_providers"
                   :key="provider"
@@ -213,29 +220,29 @@ function setSkillProvider(skillId: string, provider: string): void {
         rows="2"
         aria-label="任务目标"
         :disabled="sending"
-        placeholder="输入群任务，使用 @ 指派成员，Enter 发送"
+        placeholder="在群里说说你想做什么… 也可以用 @ 点名"
         @keydown.enter="handleEnter"
       />
       <div class="composer-toolbar">
         <div class="composer-options">
           <el-select v-model="allocationMode" aria-label="分配模式" size="small">
-            <el-option label="智能分配" value="auto" />
-            <el-option label="直接指派" value="direct" />
-            <el-option label="按功能优化" value="cross_functional" />
+            <el-option label="让管家安排" value="auto" />
+            <el-option label="我来点名" value="direct" />
+            <el-option label="按擅长的事分工" value="cross_functional" />
           </el-select>
           <el-select v-model="taskType" aria-label="任务类型" size="small">
             <el-option
               v-for="item in taskTypes"
               :key="item"
-              :label="item"
+              :label="taskTypeLabel(item)"
               :value="item"
             />
           </el-select>
           <el-select v-model="riskLevel" aria-label="风险等级" size="small">
-            <el-option label="低风险" value="low" />
-            <el-option label="中风险" value="medium" />
-            <el-option label="高风险" value="high" />
-            <el-option label="关键风险" value="critical" />
+            <el-option label="普通" value="low" />
+            <el-option label="需要留意" value="medium" />
+            <el-option label="风险较高" value="high" />
+            <el-option label="非常敏感" value="critical" />
           </el-select>
         </div>
         <div class="composer-actions">
@@ -261,6 +268,6 @@ function setSkillProvider(skillId: string, provider: string): void {
         </div>
       </div>
     </div>
-    <p class="disclaimer">所有成员使用同一执行设计；本轮功能只影响任务路由，产物默认进入独立交叉复核。</p>
+    <p class="disclaimer">群里的 AI 成员能力相同，你只是在告诉他们这次各自重点做什么。</p>
   </footer>
 </template>

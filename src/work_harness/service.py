@@ -3,7 +3,8 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
-from contextlib import suppress
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager, suppress
 from typing import Any
 from uuid import uuid4
 
@@ -40,6 +41,11 @@ class RunManager:
     def __init__(self, runtime: HarnessRuntime) -> None:
         self.runtime = runtime
         self._tasks: dict[str, asyncio.Task[Any]] = {}
+        self._run_slots = asyncio.Semaphore(
+            runtime.config.runtime.run_max_concurrency
+        )
+        self._executing: set[str] = set()
+        self._subscribers: dict[str, set[asyncio.Queue[None]]] = {}
         self._owner = f"manager_{uuid4().hex}"
         self._recovery_task: asyncio.Task[Any] | None = None
         self._closing = False
@@ -109,6 +115,10 @@ class RunManager:
     def _graph_config(self, run_id: str) -> dict[str, Any]:
         return {
             "configurable": {"thread_id": run_id},
+            "max_concurrency": max(
+                self.runtime.config.runtime.worker_max_concurrency,
+                self.runtime.config.runtime.reviewer_max_concurrency,
+            ),
             "recursion_limit": self.runtime.config.runtime.max_node_steps
             * (self.runtime.config.runtime.max_repair_rounds + 2),
         }
@@ -158,10 +168,22 @@ class RunManager:
         suffix: str | None = None,
     ) -> None:
         name = f"{run_id}:{suffix}" if suffix else run_id
-        self._tasks[run_id] = asyncio.create_task(
+        task = asyncio.create_task(
             self._execute(run_id, input_value, lease_claimed=lease_claimed),
             name=name,
         )
+        self._tasks[run_id] = task
+        task.add_done_callback(
+            lambda completed, current_run_id=run_id: self._discard_task(
+                current_run_id,
+                completed,
+            )
+        )
+
+    def _discard_task(self, run_id: str, task: asyncio.Task[Any]) -> None:
+        if self._tasks.get(run_id) is task:
+            self._tasks.pop(run_id, None)
+        self._publish(run_id)
 
     @staticmethod
     def _fingerprint(value: Any) -> str:
@@ -177,6 +199,54 @@ class RunManager:
     async def _execute(
         self, run_id: str, input_value: Any, *, lease_claimed: bool = False
     ) -> None:
+        async with self._run_slots:
+            self._executing.add(run_id)
+            try:
+                try:
+                    await self._execute_admitted(
+                        run_id,
+                        input_value,
+                        lease_claimed=lease_claimed,
+                    )
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:
+                    self._logger.exception(
+                        "run_infrastructure_failed",
+                        extra={"run_id": run_id},
+                    )
+                    await self._record_infrastructure_failure(run_id, exc)
+            finally:
+                self._executing.discard(run_id)
+
+    async def _record_infrastructure_failure(
+        self,
+        run_id: str,
+        exc: Exception,
+    ) -> None:
+        error = RunError(
+            code="run_infrastructure_failed",
+            message=f"{type(exc).__name__}: {exc}",
+            retryable=True,
+        )
+        with suppress(Exception):
+            snapshot = await self.runtime.graph.aget_state(self._graph_config(run_id))
+            if snapshot.values:
+                await self.runtime.graph.aupdate_state(
+                    self._graph_config(run_id),
+                    {
+                        "status": RunStatus.FAILED.value,
+                        "errors": [error.model_dump(mode="json")],
+                    },
+                )
+        with suppress(Exception):
+            await self.runtime.run_store.update_status(run_id, RunStatus.FAILED)
+        self._publish(run_id)
+
+    async def _execute_admitted(
+        self, run_id: str, input_value: Any, *, lease_claimed: bool = False
+    ) -> None:
+        lease_held = lease_claimed
         if not lease_claimed:
             claimed = await self.runtime.run_store.claim(
                 run_id,
@@ -185,54 +255,76 @@ class RunManager:
             )
             if claimed is None:
                 return
-        await self.runtime.run_store.update_status(run_id, RunStatus.RUNNING)
-        invocation = asyncio.create_task(
-            self.runtime.graph.ainvoke(input_value, self._graph_config(run_id)),
-            name=f"{run_id}:graph",
-        )
-        heartbeat = asyncio.create_task(
-            self._heartbeat(run_id, invocation), name=f"{run_id}:heartbeat"
-        )
+            lease_held = True
         try:
-            await asyncio.wait_for(
-                invocation,
-                timeout=self.runtime.config.runtime.run_timeout_seconds,
+            await self.runtime.run_store.update_status(run_id, RunStatus.RUNNING)
+            self._publish(run_id)
+            invocation = asyncio.create_task(
+                self._invoke_graph(run_id, input_value),
+                name=f"{run_id}:graph",
             )
-        except asyncio.CancelledError:
-            invocation.cancel()
-            raise
-        except TimeoutError:
-            error = RunError(
-                code="run_timeout",
-                message="Run exceeded the configured deadline.",
-                retryable=False,
+            heartbeat = asyncio.create_task(
+                self._heartbeat(run_id, invocation), name=f"{run_id}:heartbeat"
             )
-            await self.runtime.graph.aupdate_state(
-                self._graph_config(run_id),
-                {
-                    "status": RunStatus.FAILED.value,
-                    "errors": [error.model_dump(mode="json")],
-                },
-            )
-        except Exception as exc:  # A failed background run must remain observable.
-            error = RunError(
-                code="run_failed",
-                message=f"{type(exc).__name__}: {exc}",
-                retryable=False,
-            )
-            await self.runtime.graph.aupdate_state(
-                self._graph_config(run_id),
-                {
-                    "status": RunStatus.FAILED.value,
-                    "errors": [error.model_dump(mode="json")],
-                },
-            )
-        finally:
-            heartbeat.cancel()
-            with suppress(asyncio.CancelledError):
-                await heartbeat
+            try:
+                await asyncio.wait_for(
+                    invocation,
+                    timeout=self.runtime.config.runtime.run_timeout_seconds,
+                )
+            except asyncio.CancelledError:
+                invocation.cancel()
+                raise
+            except TimeoutError:
+                error = RunError(
+                    code="run_timeout",
+                    message="Run exceeded the configured deadline.",
+                    retryable=False,
+                )
+                await self.runtime.graph.aupdate_state(
+                    self._graph_config(run_id),
+                    {
+                        "status": RunStatus.FAILED.value,
+                        "errors": [error.model_dump(mode="json")],
+                    },
+                )
+                self._publish(run_id)
+            except Exception as exc:  # A failed background run must remain observable.
+                error = RunError(
+                    code="run_failed",
+                    message=f"{type(exc).__name__}: {exc}",
+                    retryable=False,
+                )
+                await self.runtime.graph.aupdate_state(
+                    self._graph_config(run_id),
+                    {
+                        "status": RunStatus.FAILED.value,
+                        "errors": [error.model_dump(mode="json")],
+                    },
+                )
+                self._publish(run_id)
+            finally:
+                heartbeat.cancel()
+                with suppress(asyncio.CancelledError):
+                    await heartbeat
             await self._sync_persisted_status(run_id)
-            await self.runtime.run_store.release(run_id, owner=self._owner)
+        finally:
+            if lease_held:
+                await self.runtime.run_store.release(run_id, owner=self._owner)
+            await self.runtime.tool_gateway.clear_run(run_id)
+            self._publish(run_id)
+
+    async def _invoke_graph(self, run_id: str, input_value: Any) -> None:
+        stream = getattr(self.runtime.graph, "astream", None)
+        if stream is None:
+            await self.runtime.graph.ainvoke(input_value, self._graph_config(run_id))
+            self._publish(run_id)
+            return
+        async for _ in stream(
+            input_value,
+            self._graph_config(run_id),
+            stream_mode="updates",
+        ):
+            self._publish(run_id)
 
     async def _heartbeat(self, run_id: str, invocation: asyncio.Task[Any]) -> None:
         interval = self.runtime.config.runtime.heartbeat_interval_seconds
@@ -313,11 +405,40 @@ class RunManager:
     async def list(self, *, limit: int = 50, offset: int = 0) -> list[RunRecord]:
         return await self.runtime.run_store.list(limit=limit, offset=offset)
 
+    @asynccontextmanager
+    async def subscribe(self, run_id: str) -> AsyncIterator[asyncio.Queue[None]]:
+        queue: asyncio.Queue[None] = asyncio.Queue(maxsize=1)
+        subscribers = self._subscribers.setdefault(run_id, set())
+        subscribers.add(queue)
+        try:
+            yield queue
+        finally:
+            subscribers.discard(queue)
+            if not subscribers:
+                self._subscribers.pop(run_id, None)
+
+    def _publish(self, run_id: str) -> None:
+        for queue in tuple(self._subscribers.get(run_id, ())):
+            if queue.empty():
+                queue.put_nowait(None)
+
+    def stats(self) -> dict[str, int]:
+        running = sum(not task.done() for task in self._tasks.values())
+        return {
+            "active_runs": len(self._executing),
+            "queued_runs": max(0, running - len(self._executing)),
+            "stream_subscribers": sum(
+                len(subscribers) for subscribers in self._subscribers.values()
+            ),
+            "run_max_concurrency": self.runtime.config.runtime.run_max_concurrency,
+        }
+
     async def resume(self, run_id: str, *, approved: bool, note: str | None = None) -> None:
         result = await self.get(run_id)
         if result.status != RunStatus.WAITING_HUMAN:
             raise ValueError(f"run is not waiting for human input: {result.status}")
         await self.runtime.run_store.update_status(run_id, RunStatus.RUNNING)
+        self._publish(run_id)
         self._spawn_execute(
             run_id,
             Command(resume={"approved": approved, "note": note}),
@@ -333,8 +454,12 @@ class RunManager:
                 await task
             except asyncio.CancelledError:
                 pass
-        await self.runtime.graph.aupdate_state(
-            self._graph_config(run_id),
-            {"status": RunStatus.CANCELLED.value},
-        )
+        snapshot = await self.runtime.graph.aget_state(self._graph_config(run_id))
+        if snapshot.values:
+            await self.runtime.graph.aupdate_state(
+                self._graph_config(run_id),
+                {"status": RunStatus.CANCELLED.value},
+            )
         await self.runtime.run_store.update_status(run_id, RunStatus.CANCELLED)
+        await self.runtime.tool_gateway.clear_run(run_id)
+        self._publish(run_id)

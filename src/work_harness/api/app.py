@@ -16,6 +16,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict
 
 from work_harness import __version__
+from work_harness.api.middleware import RequestGuardMiddleware
 from work_harness.config.models import AppConfig, ProviderConfig
 from work_harness.domain.enums import AgentFunction, RunStatus
 from work_harness.domain.models import RunResult, TaskRequest
@@ -131,6 +132,11 @@ def create_app(project_root: Path | str | None = None) -> FastAPI:
         lifespan=lifespan,
         dependencies=[Depends(authorize)],
     )
+    app.add_middleware(
+        RequestGuardMiddleware,
+        max_body_bytes=preview.api.request_max_bytes,
+        rate_limit_per_minute=preview.api.rate_limit_per_minute,
+    )
 
     @app.get("/health/live", include_in_schema=False)
     async def liveness() -> dict[str, str]:
@@ -145,6 +151,7 @@ def create_app(project_root: Path | str | None = None) -> FastAPI:
             "run_store": state_holder.runtime.run_store.backend,
             "provider_store": state_holder.runtime.provider_store.backend,
             "provider_compatible": state_holder.runtime.provider_compatibility.compatible,
+            "scheduler": state_holder.runs.stats(),
         }
 
     def provider_readiness(config: ProviderConfig) -> tuple[bool | None, bool | None]:
@@ -256,6 +263,18 @@ def create_app(project_root: Path | str | None = None) -> FastAPI:
             ],
             "task_types": ["general", "planning", "decision", "research", "code"],
             "allocation_modes": ["auto", "direct", "cross_functional"],
+            "runtime_policy": {
+                "review_strategy": state_holder.runtime.config.runtime.review_strategy,
+                "deep_review_risk_levels": sorted(
+                    state_holder.runtime.config.runtime.deep_review_risk_levels
+                ),
+                "deep_review_task_types": sorted(
+                    state_holder.runtime.config.runtime.deep_review_task_types
+                ),
+                "run_max_concurrency": (
+                    state_holder.runtime.config.runtime.run_max_concurrency
+                ),
+            },
             "functions": [
                 {"id": function, "display_name": label, "description": description}
                 for function, (label, description) in function_labels.items()
@@ -380,49 +399,44 @@ def create_app(project_root: Path | str | None = None) -> FastAPI:
     @app.get("/v1/runs/{run_id}/events")
     async def stream_run(run_id: str, request: Request) -> StreamingResponse:
         try:
-            initial = await state_holder.runs.get(run_id)
+            await state_holder.runs.get(run_id)
         except RunNotFoundError as exc:
             raise HTTPException(status_code=404, detail="run not found") from exc
 
         async def events() -> AsyncIterator[str]:
-            previous_fingerprint = ""
-            current = initial
+            previous_payload = ""
             sequence = 0
-            keepalive_ticks = 0
-            while True:
-                fingerprint = ":".join(
-                    (
-                        str(current.status),
-                        str(len(current.artifacts)),
-                        str(len(current.reviews)),
-                        str(len(current.model_calls)),
-                        str(len(current.tool_calls)),
-                        str(len(current.errors)),
-                    )
-                )
-                if fingerprint != previous_fingerprint:
-                    sequence += 1
+            keepalive_seconds = (
+                state_holder.runtime.config.runtime.sse_keepalive_seconds
+            )
+            async with state_holder.runs.subscribe(run_id) as updates:
+                current = await state_holder.runs.get(run_id)
+                while True:
                     payload = json.dumps(
                         current.model_dump(mode="json"),
                         ensure_ascii=False,
                         separators=(",", ":"),
                     )
-                    yield f"id: {sequence}\nevent: run\ndata: {payload}\n\n"
-                    previous_fingerprint = fingerprint
-                    keepalive_ticks = 0
-                if current.status not in {RunStatus.PENDING, RunStatus.RUNNING}:
-                    return
-                if await request.is_disconnected():
-                    return
-                await asyncio.sleep(0.25)
-                keepalive_ticks += 1
-                if keepalive_ticks >= 60:
-                    yield ": keepalive\n\n"
-                    keepalive_ticks = 0
-                try:
-                    current = await state_holder.runs.get(run_id)
-                except RunNotFoundError:
-                    return
+                    if payload != previous_payload:
+                        sequence += 1
+                        yield f"id: {sequence}\nevent: run\ndata: {payload}\n\n"
+                        previous_payload = payload
+                    if current.status not in {RunStatus.PENDING, RunStatus.RUNNING}:
+                        return
+                    if await request.is_disconnected():
+                        return
+                    try:
+                        await asyncio.wait_for(
+                            updates.get(),
+                            timeout=keepalive_seconds,
+                        )
+                    except TimeoutError:
+                        yield ": keepalive\n\n"
+                        continue
+                    try:
+                        current = await state_holder.runs.get(run_id)
+                    except RunNotFoundError:
+                        return
 
         return StreamingResponse(
             events(),

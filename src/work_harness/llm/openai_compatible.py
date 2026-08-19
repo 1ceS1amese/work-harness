@@ -44,7 +44,13 @@ class OpenAICompatibleProvider:
             )
         self._validate_base_url(self._base_url)
         self._owns_client = client is None
-        self._client = client or httpx.AsyncClient(timeout=config.timeout_seconds)
+        self._client = client or httpx.AsyncClient(
+            timeout=config.timeout_seconds,
+            limits=httpx.Limits(
+                max_connections=config.max_concurrency,
+                max_keepalive_connections=config.max_concurrency,
+            ),
+        )
 
     def _validate_base_url(self, value: str) -> None:
         parsed = urlparse(value)

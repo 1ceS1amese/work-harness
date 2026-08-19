@@ -1,3 +1,4 @@
+import asyncio
 from pathlib import Path
 
 import pytest
@@ -115,3 +116,51 @@ async def test_agent_route_prefers_provider_for_one_subagent() -> None:
     pinned_response = await gateway.complete(explicitly_pinned)
 
     assert pinned_response.provider == "mock"
+
+
+@pytest.mark.asyncio
+async def test_provider_concurrency_is_bounded() -> None:
+    class SlowMockProvider(MockProvider):
+        def __init__(self) -> None:
+            super().__init__()
+            self.active = 0
+            self.max_active = 0
+
+        async def complete(self, request, *, model):
+            self.active += 1
+            self.max_active = max(self.max_active, self.active)
+            try:
+                await asyncio.sleep(0.02)
+                return await super().complete(request, model=model)
+            finally:
+                self.active -= 1
+
+    config = load_app_config(PROJECT_ROOT)
+    mock_config = config.models.providers["mock"].model_copy(
+        update={"max_concurrency": 1}
+    )
+    models = config.models.model_copy(
+        update={
+            "providers": {
+                **config.models.providers,
+                "mock": mock_config,
+            }
+        }
+    )
+    provider = SlowMockProvider()
+    gateway = ModelGateway(models, {"mock": provider}, config.runtime)
+    request = ModelRequest(
+        run_id="run_bounded",
+        trace_id="trace_bounded",
+        node_name="plan",
+        agent_role="planner",
+        logical_model="planner-strong",
+        messages=[ModelMessage(role="user", content="plan")],
+        required_capabilities={"chat", "structured_output"},
+        response_schema=Plan.model_json_schema(),
+        metadata={"operation": "plan", "payload": {"task": {"goal": "test"}}},
+    )
+
+    await asyncio.gather(*(gateway.complete(request) for _ in range(3)))
+
+    assert provider.max_active == 1

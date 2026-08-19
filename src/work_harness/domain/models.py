@@ -371,6 +371,7 @@ class ToolCallRecord(ContractModel):
     output_summary: str
     truncated: bool = False
     duration_ms: int = Field(default=0, ge=0)
+    cache_hit: bool = False
 
 
 class RunError(ContractModel):

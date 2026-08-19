@@ -45,7 +45,9 @@ describe('群聊编排模板', () => {
 
     expect(wrapper.text()).toContain('项目交付协作群')
     expect(wrapper.find('[title="智能成员一"]').exists()).toBe(true)
-    expect(wrapper.text()).toContain('2 位成员 · 正在协作')
+    expect(wrapper.text()).toContain('2 位 AI 小伙伴在群里')
+    expect(wrapper.text()).toContain('群公告')
+    expect(wrapper.text()).toContain('你群主')
     expect(wrapper.text()).toContain('群聊列表')
     expect(wrapper.text()).toContain('群消息记录')
     expect(wrapper.text()).toContain('任务输入区')

@@ -5,8 +5,8 @@ from typing import Any
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Send
 
-from work_harness.config.models import AppConfig
-from work_harness.domain.enums import DecisionAction, RunStatus
+from work_harness.config.models import AppConfig, RuntimeConfig
+from work_harness.domain.enums import DecisionAction, RiskLevel, RunStatus
 from work_harness.llm.gateway import ModelGateway
 from work_harness.observability.trace import TraceRecorder
 from work_harness.prompts import PromptRegistry
@@ -52,7 +52,10 @@ def build_root_graph(
     builder.add_conditional_edges("plan", _dispatch_workers)
     builder.add_edge("worker", "schedule")
     builder.add_conditional_edges("schedule", _dispatch_after_schedule)
-    builder.add_conditional_edges("validate", _dispatch_reviewers)
+    builder.add_conditional_edges(
+        "validate",
+        lambda state: _dispatch_reviewers(state, config.runtime),
+    )
     builder.add_edge("reviewer", "judge")
     builder.add_conditional_edges(
         "judge",
@@ -101,7 +104,6 @@ def _dispatch_workers(state: GraphState) -> list[Send] | str:
                     "subtask": subtask,
                     "artifact_version": next_version,
                     "repair_round": state.get("repair_round", 0),
-                    "model_calls": state.get("model_calls", []),
                 },
             )
         )
@@ -116,12 +118,32 @@ def _dispatch_after_schedule(state: GraphState) -> list[Send] | str:
     return _dispatch_workers(state)
 
 
-def _dispatch_reviewers(state: GraphState) -> list[Send] | str:
+def _review_dimensions(state: GraphState, runtime: RuntimeConfig) -> tuple[str, ...]:
+    cross_review = state.get("task", {}).get("assignment", {}).get("cross_review", True)
+    if not cross_review:
+        return ("constraint",)
+    if runtime.review_strategy == "three_dimensional":
+        return ("fact", "logic", "constraint")
+    if runtime.review_strategy == "comprehensive":
+        return ("comprehensive",)
+    risk = RiskLevel(state.get("task", {}).get("risk_level", RiskLevel.LOW))
+    task_type = str(state.get("task", {}).get("task_type", "general"))
+    if (
+        risk in runtime.deep_review_risk_levels
+        or task_type in runtime.deep_review_task_types
+    ):
+        return ("fact", "logic", "constraint")
+    return ("comprehensive",)
+
+
+def _dispatch_reviewers(
+    state: GraphState,
+    runtime: RuntimeConfig,
+) -> list[Send] | str:
     artifacts = latest_artifacts(state.get("artifacts", []))
     if not artifacts:
         return "judge"
-    cross_review = state.get("task", {}).get("assignment", {}).get("cross_review", True)
-    dimensions = ("fact", "logic", "constraint") if cross_review else ("constraint",)
+    dimensions = _review_dimensions(state, runtime)
     sends: list[Send] = []
     for artifact in artifacts:
         for dimension in dimensions:
@@ -131,8 +153,6 @@ def _dispatch_reviewers(state: GraphState) -> list[Send] | str:
                     {
                         "run_id": state["run_id"],
                         "task": state["task"],
-                        "artifacts": state.get("artifacts", []),
-                        "model_calls": state.get("model_calls", []),
                         "review_job": {"artifact": artifact, "dimension": dimension},
                     },
                 )

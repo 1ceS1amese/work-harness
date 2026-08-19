@@ -39,6 +39,7 @@ beforeEach(() => {
           allowed_models: ['main-model', 'worker-model'],
           capabilities: ['chat', 'structured_output', 'tool_calling'],
           timeout_seconds: 60,
+          max_concurrency: 8,
           allow_insecure_http: false,
           allow_private_network: false,
           options: {},

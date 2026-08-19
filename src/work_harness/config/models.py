@@ -36,8 +36,18 @@ class TraceConfig(ConfigModel):
 
 class RuntimeConfig(ConfigModel):
     schema_version: int = 1
+    run_max_concurrency: int = Field(default=4, ge=1, le=64)
     worker_max_concurrency: int = Field(default=4, ge=1, le=32)
     reviewer_max_concurrency: int = Field(default=3, ge=1, le=32)
+    review_strategy: Literal["adaptive", "comprehensive", "three_dimensional"] = (
+        "adaptive"
+    )
+    deep_review_risk_levels: set[RiskLevel] = Field(
+        default_factory=lambda: {RiskLevel.HIGH, RiskLevel.CRITICAL}
+    )
+    deep_review_task_types: set[str] = Field(
+        default_factory=lambda: {"research", "decision"}
+    )
     max_planned_subtasks: int = Field(default=4, ge=1, le=32)
     max_repair_rounds: int = Field(default=1, ge=0, le=5)
     max_node_steps: int = Field(default=10, ge=1, le=100)
@@ -47,7 +57,9 @@ class RuntimeConfig(ConfigModel):
     cost_budget_usd: float = Field(default=5.0, ge=0)
     max_artifact_chars: int = Field(default=20_000, ge=100)
     max_tool_result_chars: int = Field(default=8_000, ge=100)
+    tool_cache_max_entries: int = Field(default=256, ge=0, le=100_000)
     model_retry_attempts: int = Field(default=2, ge=0, le=5)
+    sse_keepalive_seconds: float = Field(default=15, ge=1, le=120)
     recovery_enabled: bool = True
     run_lease_seconds: float = Field(default=30, ge=5, le=3600)
     heartbeat_interval_seconds: float = Field(default=10, ge=1, le=600)
@@ -79,6 +91,7 @@ class ProviderConfig(ConfigModel):
     allowed_models: list[str] = Field(default_factory=list)
     capabilities: set[str] = Field(default_factory=set)
     timeout_seconds: float = Field(default=60, gt=0)
+    max_concurrency: int = Field(default=8, ge=1, le=256)
     allow_insecure_http: bool = False
     allow_private_network: bool = False
     options: dict[str, Any] = Field(default_factory=dict)

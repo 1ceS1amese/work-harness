@@ -39,7 +39,7 @@ const filteredConversations = computed(() => {
 function lastStatus(conversation: Conversation): string {
   const messages = [...conversation.messages].reverse()
   const status = messages.find((item) => item.status)?.status
-  return status ? STATUS_LABELS[status] : conversation.messages.length > 0 ? '已记录' : '未开始'
+  return status ? STATUS_LABELS[status] : conversation.messages.length > 0 ? '刚刚聊过' : '还没聊过'
 }
 </script>
 
@@ -48,29 +48,29 @@ function lastStatus(conversation: Conversation): string {
     <div class="brand">
       <span class="brand-mark"><Connection /></span>
       <div>
-        <strong>Work Harness</strong>
-        <span>智能协作台</span>
+        <strong>AI 协作群</strong>
+        <span>Work Harness</span>
       </div>
     </div>
 
     <el-button class="new-chat" type="primary" :icon="Plus" @click="emit('create')">
-      新建对话
+      发起新群聊
     </el-button>
 
     <el-input
       v-model="query"
       class="history-search"
       clearable
-      placeholder="搜索历史对话"
+      placeholder="搜索群聊"
       :prefix-icon="Search"
     />
 
     <div class="history-section">
-      <p class="section-label">最近对话</p>
+      <p class="section-label">消息</p>
       <el-empty
         v-if="filteredConversations.length === 0"
         :image-size="52"
-        description="没有匹配的对话"
+        description="没找到相关群聊"
       />
       <button
         v-for="conversation in filteredConversations"
@@ -80,7 +80,7 @@ function lastStatus(conversation: Conversation): string {
         type="button"
         @click="emit('select', conversation.id)"
       >
-        <ChatDotRound />
+        <span class="history-avatar"><ChatDotRound /></span>
         <span>
           <strong>{{ conversation.title }}</strong>
           <small>
@@ -88,7 +88,7 @@ function lastStatus(conversation: Conversation): string {
           </small>
         </span>
         <el-popconfirm
-          title="删除这条本地对话记录？"
+          title="删除这条本地群聊记录？"
           confirm-button-text="删除"
           cancel-button-text="保留"
           width="210"
@@ -99,7 +99,7 @@ function lastStatus(conversation: Conversation): string {
               class="history-delete"
               role="button"
               tabindex="0"
-              aria-label="删除对话"
+              aria-label="删除群聊"
               @click.stop
               @keydown.enter.stop
             >
@@ -115,7 +115,7 @@ function lastStatus(conversation: Conversation): string {
         <component :is="dark ? Sunny : Moon" />
         {{ dark ? '浅色模式' : '深色模式' }}
       </button>
-      <p>历史记录仅保存在当前设备</p>
+      <p>聊天记录只保存在这台设备上</p>
     </div>
   </aside>
 </template>

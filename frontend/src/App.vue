@@ -31,6 +31,7 @@ import type {
   SkillSelection,
 } from './types'
 import { ACTIVE_RUN_STATUSES, resultMessage } from './utils/run'
+import { taskTypeLabel } from './utils/labels'
 
 const ProviderSettingsDrawer = defineAsyncComponent(
   () => import('./components/ProviderSettingsDrawer.vue'),
@@ -73,10 +74,10 @@ const logicalModels = ref([
 ])
 const skills = ref<SkillDescriptor[]>([])
 const agentFunctions = ref<AgentFunctionDescriptor[]>([
-  { id: 'analysis', display_name: '分析', description: '梳理需求与比较方案' },
-  { id: 'research', display_name: '研究', description: '收集资料与可追溯证据' },
-  { id: 'execution', display_name: '执行', description: '实现方案并形成结果' },
-  { id: 'risk', display_name: '风险', description: '识别安全、合规与交付风险' },
+  { id: 'analysis', display_name: '梳理思路', description: '先把需求和重点捋清楚' },
+  { id: 'research', display_name: '查找资料', description: '帮你找资料、核对出处' },
+  { id: 'execution', display_name: '动手完成', description: '把方案做出来并整理好' },
+  { id: 'risk', display_name: '检查风险', description: '提前看看哪里可能出问题' },
 ])
 const agents = ref<AgentDescriptor[]>([
   {
@@ -575,7 +576,7 @@ onBeforeUnmount(() => {
     </template>
 
     <template #header-actions>
-      <el-tag round effect="plain">{{ activeConversation.taskType }}</el-tag>
+      <el-tag round effect="plain">{{ taskTypeLabel(activeConversation.taskType) }}</el-tag>
       <el-button
         circle
         :icon="Refresh"
@@ -585,7 +586,7 @@ onBeforeUnmount(() => {
       <el-button
         circle
         :icon="Setting"
-        aria-label="Provider 与模型路由"
+        aria-label="模型服务与成员分配"
         @click="providerSettingsOpen = true"
       />
       <el-button
@@ -601,20 +602,20 @@ onBeforeUnmount(() => {
       <section ref="conversationPane" class="conversation">
         <div v-if="activeConversation.messages.length === 0" class="welcome-card">
           <div class="welcome-mark"><EditPen /></div>
-          <p class="eyebrow"><Connection /> 多成员群聊协作</p>
-          <h2>把任务发到协作群</h2>
+          <p class="eyebrow"><Connection /> AI 协作群</p>
+          <h2>有什么事，发群里聊聊</h2>
           <p>
-            使用 @成员直接指派，或让任务协调员自动拆分；执行结果会在群内交叉复核并汇总。
+            直接说你想做什么就行。任务管家会帮你拆分、找人处理，做完后大家还会互相检查。
           </p>
           <div class="suggestions">
-            <button type="button" @click="useSuggestion('制定一个可执行的项目启动计划')">
-              制定一个可执行的项目计划
+            <button type="button" @click="useSuggestion('帮我安排一份能直接照着做的项目启动计划')">
+              帮我安排项目启动步骤
             </button>
-            <button type="button" @click="useSuggestion('比较两个方案并给出有依据的建议')">
-              比较两个方案并给出建议
+            <button type="button" @click="useSuggestion('帮我比较这两个方案，说说你更推荐哪一个')">
+              帮我选一个更合适的方案
             </button>
-            <button type="button" @click="useSuggestion('分析这份材料并整理关键风险')">
-              分析材料并整理关键风险
+            <button type="button" @click="useSuggestion('帮我看看这份材料里有哪些容易踩坑的地方')">
+              帮我看看哪里容易踩坑
             </button>
           </div>
         </div>
@@ -673,7 +674,7 @@ onBeforeUnmount(() => {
       >
         <p class="auth-dialog-copy">
           输入部署环境的 WORK_HARNESS_API_KEY。密钥只保存在当前浏览器标签页的
-          sessionStorage，不会写入 Provider 配置。
+          sessionStorage，不会写入模型服务配置。
         </p>
         <el-input
           v-model="apiKeyInput"

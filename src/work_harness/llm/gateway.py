@@ -20,6 +20,11 @@ class ModelGateway:
         self._config = config
         self._providers = providers
         self._runtime = runtime
+        self._provider_slots = {
+            name: asyncio.Semaphore(provider.max_concurrency)
+            for name, provider in config.providers.items()
+            if provider.enabled and name in providers
+        }
         self._logger = get_logger("work_harness.model_gateway")
 
     @property
@@ -86,7 +91,12 @@ class ModelGateway:
             for attempt in range(self._runtime.model_retry_attempts + 1):
                 try:
                     response = await asyncio.wait_for(
-                        provider.complete(request, model=candidate.model),
+                        self._complete_with_slot(
+                            candidate.provider,
+                            provider,
+                            request,
+                            candidate.model,
+                        ),
                         timeout=min(request.timeout_seconds, provider_config.timeout_seconds),
                     )
                     return response.model_copy(
@@ -126,17 +136,33 @@ class ModelGateway:
             f"{sorted(required_capabilities)}"
         )
 
+    async def _complete_with_slot(
+        self,
+        provider_name: str,
+        provider: ModelProvider,
+        request: ModelRequest,
+        model: str,
+    ) -> ModelResponse:
+        async with self._provider_slots[provider_name]:
+            return await provider.complete(request, model=model)
+
     async def health(self) -> dict[str, bool]:
-        results: dict[str, bool] = {}
-        for name, provider in self._providers.items():
+        async def inspect(name: str, provider: ModelProvider) -> tuple[str, bool]:
             try:
-                results[name] = await provider.healthcheck()
+                return name, await provider.healthcheck()
             except Exception:
-                results[name] = False
-        return results
+                return name, False
+
+        inspected = await asyncio.gather(
+            *(inspect(name, provider) for name, provider in self._providers.items())
+        )
+        return dict(inspected)
 
     async def close(self) -> None:
+        closers = []
         for provider in self._providers.values():
             close = getattr(provider, "close", None)
             if close is not None:
-                await close()
+                closers.append(close())
+        if closers:
+            await asyncio.gather(*closers)

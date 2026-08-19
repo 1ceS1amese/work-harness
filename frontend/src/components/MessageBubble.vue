@@ -5,7 +5,6 @@ import {
   CircleClose,
   Document,
   Loading,
-  User,
 } from '@element-plus/icons-vue'
 
 import type { AgentDescriptor, Artifact, ChatMessage, RunResult } from '../types'
@@ -16,6 +15,11 @@ import {
   statusTagType,
   STATUS_LABELS,
 } from '../utils/run'
+import {
+  functionLabel,
+  reviewDimensionLabel,
+  subtaskTitleLabel,
+} from '../utils/labels'
 
 interface AgentEvent {
   id: string
@@ -45,13 +49,6 @@ const stage = computed(() => (props.run ? getRunStage(props.run) : null))
 const isActive = computed(
   () => props.message.status !== undefined && ACTIVE_RUN_STATUSES.includes(props.message.status),
 )
-const functionLabels: Record<string, string> = {
-  analysis: '分析',
-  research: '研究',
-  execution: '执行',
-  risk: '风险',
-}
-
 function descriptor(agentId: string): AgentDescriptor | undefined {
   return props.agents.find((item) => item.id === agentId)
 }
@@ -93,8 +90,8 @@ const agentEvents = computed<AgentEvent[]>(() => {
         'planner',
         props.message.content,
         'planner',
-        '编排系统',
-        '正在接收任务',
+        '任务管家',
+        '正在看你的消息',
       ),
     ]
   }
@@ -109,11 +106,11 @@ const agentEvents = computed<AgentEvent[]>(() => {
         `${run.run_id}:accepted`,
         'planner',
         assigneeNames
-          ? `已收到任务。本轮由 ${assigneeNames} 协作，${run.task.assignment.cross_review ? '启用三维交叉复核。' : '采用单维约束复核。'}`
-          : '已收到任务，正在根据目标自动选择执行成员。',
+          ? `收到，我先来安排一下。这次请 ${assigneeNames} 一起做。${run.task.assignment.cross_review ? '做完后，我会让大家再互相检查一遍。' : '做完后，我会进行一轮基本检查。'}`
+          : '收到。我先看看这件事怎么分工，再叫合适的成员来处理。',
         'planner',
-        '编排系统',
-        '自动编排',
+        '任务管家',
+        '负责安排分工',
       ),
     )
   }
@@ -123,69 +120,72 @@ const agentEvents = computed<AgentEvent[]>(() => {
       .map((item) => {
         const member = descriptor(item.worker_role)?.display_name ?? item.worker_role
         const assignedFunction = item.assigned_function
-          ? `（${functionLabels[item.assigned_function]}）`
+          ? `，重点负责${functionLabel(item.assigned_function)}`
           : ''
-        return `• ${item.title} → ${member}${assignedFunction}`
+        return `• ${member}：${subtaskTitleLabel(item.title)}${assignedFunction}`
       })
       .join('\n')
     events.push(
       eventFor(
         `${run.run_id}:plan:${run.plan.version}`,
         'planner',
-        `已拆分 ${run.plan.subtasks.length} 个子任务并完成分配：\n${allocation}`,
+        `我把这件事分成了 ${run.plan.subtasks.length} 部分，大家这样配合：\n${allocation}`,
         'planner',
-        '编排系统',
-        '自动编排',
+        '任务管家',
+        '已经安排好了',
       ),
     )
   }
 
   for (const artifact of latestArtifacts(run.artifacts)) {
     const event = eventFor(
-        `${artifact.artifact_id}:${artifact.version}`,
-        artifact.producer,
-        artifact.content,
-        artifact.producer.replace('worker-', ''),
-        artifact.producer,
-        '子任务执行',
-      )
+      `${artifact.artifact_id}:${artifact.version}`,
+      artifact.producer,
+      artifact.content,
+      artifact.producer.replace('worker-', ''),
+      artifact.producer,
+      '正在处理分到的事情',
+    )
     const subtask = run.plan?.subtasks.find((item) => item.subtask_id === artifact.subtask_id)
     event.specialty = subtask?.assigned_function
-      ? `${functionLabels[subtask.assigned_function]}功能`
-      : '执行功能'
+      ? `这次负责${functionLabel(subtask.assigned_function)}`
+      : '已经处理完成'
     events.push(event)
   }
 
   const reviewLabels: Record<string, string> = {
-    fact: '复核系统',
-    logic: '复核系统',
-    constraint: '复核系统',
+    comprehensive: '复核助手',
+    fact: '事实核对助手',
+    logic: '思路检查助手',
+    constraint: '要求检查助手',
   }
-  for (const dimension of ['fact', 'logic', 'constraint']) {
+  for (const dimension of ['comprehensive', 'fact', 'logic', 'constraint']) {
     const reviews = run.reviews.filter((item) => item.dimension === dimension)
     if (reviews.length === 0) continue
     const passed = reviews.filter((item) => item.verdict === 'pass').length
     const issues = reviews.flatMap((item) => item.issues).map((item) => item.message)
-    const details = issues.length > 0 ? `\n发现：${issues.join('；')}` : ''
+    const details = issues.length > 0 ? `\n需要留意：${issues.join('；')}` : ''
     events.push(
       eventFor(
         `${run.run_id}:review:${dimension}:${reviews.length}`,
         'reviewer',
-        `已独立复核 ${reviews.length} 份产物，${passed} 份通过。${details}`,
+        passed === reviews.length
+          ? `我检查了 ${reviews.length} 份结果，目前都没发现问题。${details}`
+          : `我检查了 ${reviews.length} 份结果，其中 ${passed} 份没问题。${details}`,
         `review-${dimension}`,
-        reviewLabels[dimension] ?? '复核员',
-        `${dimension} 维度复核`,
+        reviewLabels[dimension] ?? '复核助手',
+        reviewDimensionLabel(dimension),
       ),
     )
-    events[events.length - 1]!.name = reviewLabels[dimension] ?? '复核员'
+    events[events.length - 1]!.name = reviewLabels[dimension] ?? '复核助手'
   }
 
   if (run.decision) {
     const actionLabels = {
-      approve: '通过质量门禁，可以进入最终汇总。',
-      repair: '发现需要返工的内容，已退回目标成员处理。',
-      request_human: run.decision.human_prompt || '风险较高，需要群主确认后继续。',
-      fail: '未通过质量门禁，本轮运行结束。',
+      approve: '最后一遍也检查完了，没发现需要拦住的问题。我这就整理最终回复。',
+      repair: '有些地方还得补一补，我已经请对应成员继续修改。',
+      request_human: run.decision.human_prompt || '这一步风险比较高，得请你确认后才能继续。',
+      fail: '这次没能通过最后检查，任务先停在这里。',
     }
     events.push(
       eventFor(
@@ -193,8 +193,8 @@ const agentEvents = computed<AgentEvent[]>(() => {
         'judge',
         actionLabels[run.decision.action],
         'judge',
-        '质量门禁',
-        '质量门禁',
+        '把关助手',
+        '负责最后检查',
       ),
     )
   }
@@ -206,8 +206,8 @@ const agentEvents = computed<AgentEvent[]>(() => {
         'synthesizer',
         run.output,
         'synthesizer',
-        '汇总系统',
-        '最终成果',
+        '总结助手',
+        '整理好的最终回复',
       ),
     )
   }
@@ -217,11 +217,14 @@ const agentEvents = computed<AgentEvent[]>(() => {
 
 <template>
   <article v-if="message.role === 'user'" class="message message-user">
-    <div class="message-avatar"><User /></div>
     <div class="message-body">
-      <div class="message-meta"><strong>你 · 群主</strong></div>
+      <div class="message-meta">
+        <small>{{ formatCompactTime(message.createdAt) }}</small>
+        <strong>你</strong>
+      </div>
       <div class="message-content">{{ message.content }}</div>
     </div>
+    <div class="message-avatar user-message-avatar">我</div>
   </article>
 
   <div v-else class="agent-thread">
@@ -252,7 +255,7 @@ const agentEvents = computed<AgentEvent[]>(() => {
             <CircleCheck v-else-if="message.status === 'succeeded'" />
             <CircleClose v-else-if="message.status === 'failed'" />
             <Document v-else />
-            协作进度 · {{ stage.label }}
+            任务进度 · {{ stage.label }}
           </span>
           <el-tag
             v-if="message.status"
@@ -271,35 +274,35 @@ const agentEvents = computed<AgentEvent[]>(() => {
           :status="message.status === 'failed' ? 'exception' : message.status === 'succeeded' ? 'success' : undefined"
         />
         <div class="run-facts">
-          <span>{{ run.plan?.subtasks.length ?? 0 }} 个分派</span>
-          <span>{{ run.artifacts.length }} 条成员产出</span>
-          <span>{{ run.reviews.length }} 次交叉复核</span>
+          <span>{{ run.plan?.subtasks.length ?? 0 }} 件分工</span>
+          <span>{{ run.artifacts.length }} 份成员回复</span>
+          <span>{{ run.reviews.length }} 次检查</span>
         </div>
       </template>
       <div v-else class="run-placeholder">
-        <Loading class="spin" /> 正在创建协作群任务…
+        <Loading class="spin" /> 任务管家正在安排这件事…
       </div>
 
       <div v-if="message.status === 'waiting_human' && message.runId" class="approval-box">
-        <strong>质量门禁请求群主决定</strong>
-        <p>高风险步骤已暂停。你可以附上说明，再批准或拒绝。</p>
-        <el-input v-model="note" maxlength="500" placeholder="可选：补充审批说明" />
+        <strong>这一步需要你点头</strong>
+        <p>因为风险比较高，大家先暂停了。你可以补充一句说明，再决定要不要继续。</p>
+        <el-input v-model="note" maxlength="500" placeholder="有补充说明的话，可以写在这里" />
         <div>
           <el-button
             type="primary"
             :loading="actionBusy"
             @click="emit('approve', message.runId, note)"
           >
-            批准并继续
+            可以，继续吧
           </el-button>
           <el-button :loading="actionBusy" @click="emit('reject', message.runId, note)">
-            拒绝
+            先不要做
           </el-button>
         </div>
       </div>
 
       <div v-if="message.runId" class="run-actions">
-        <el-button text size="small" @click="emit('details', message.runId)">查看协作链路</el-button>
+        <el-button text size="small" @click="emit('details', message.runId)">看看大家怎么做的</el-button>
         <el-button
           v-if="isActive"
           text
@@ -307,7 +310,7 @@ const agentEvents = computed<AgentEvent[]>(() => {
           :loading="actionBusy"
           @click="emit('cancel', message.runId)"
         >
-          停止运行
+          先停一下
         </el-button>
       </div>
     </section>

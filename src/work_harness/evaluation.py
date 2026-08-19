@@ -102,7 +102,7 @@ async def run_evaluation(runtime: HarnessRuntime, cases_path: Path) -> dict[str,
     )
     total_tool_calls = sum(int(row["tool_calls"]) for row in rows)
     return {
-        "version": "framework-002",
+        "version": "framework-003",
         "evaluation_scope": "mock_provider_workflow_smoke",
         "quality_claim": False,
         "case_count": len(rows),

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "work-harness"
-version = "0.2.0"
+version = "0.2.1"
 description = "A controlled, observable, and testable multi-agent workflow harness."
 readme = "README.md"
 requires-python = ">=3.11"

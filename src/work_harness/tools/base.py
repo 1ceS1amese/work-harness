@@ -16,6 +16,7 @@ class ToolExecutionResult(ToolPayload):
     output_summary: str
     truncated: bool = False
     duration_ms: int = Field(ge=0)
+    cache_hit: bool = False
 
 
 class ToolHandler(Protocol):
@@ -40,4 +41,3 @@ class ToolApprovalRequired(ToolError):
 
 class ToolNotFoundError(ToolError):
     pass
-

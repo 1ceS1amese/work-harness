@@ -115,7 +115,7 @@ uv run work-harness serve
 通过容器镜像和源码分发。
 
 ```bash
-python -m pip install work_harness-0.2.0-py3-none-any.whl
+python -m pip install work_harness-0.2.1-py3-none-any.whl
 work-harness check-config
 work-harness serve --host 127.0.0.1 --port 8000
 ```
@@ -190,7 +190,8 @@ Normalize → Plan → Worker → Validate → Review → Judge
 
 四个同构 Worker 共享契约、预算和工具权限，以任务函数和路由区分行为，而不是固化为永久职业。
 参见[架构决策](docs/architecture_decisions.md)、[持久化契约](docs/persistence.md)与
-[安全边界](docs/security_boundary.md)。
+[安全边界](docs/security_boundary.md)。后端调度、自适应复核和可重复基准见
+[后端性能设计](docs/backend-performance.md)。
 
 ## Provider 与 Skill 兼容性
 
@@ -243,9 +244,11 @@ Provider 声明、适配器行为、逻辑路由或 Skill 要求不一致时，�
 
 ## 项目状态
 
-版本 `0.2.0` 当前包括：
+版本 `0.2.1` 当前包括：
 
-- 61 个后端测试与 13 个前端测试；
+- 66 个后端测试与 14 个前端测试；
+- 风险自适应复核：高风险任务保留三维检查，确定性低风险流程由 11 次模型调用降至 7 次；
+- 事件驱动 SSE、受限的运行/Provider 并发和运行级幂等 Tool 缓存；
 - 10/10 的确定性 Mock 工作流评测；
 - 可持久化的 Provider Profile 与按 Agent 划分的模型路由；
 - 基于租约和心跳的单实例重启恢复；

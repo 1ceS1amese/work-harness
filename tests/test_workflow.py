@@ -1,3 +1,4 @@
+import asyncio
 from pathlib import Path
 
 import pytest
@@ -27,9 +28,10 @@ async def test_root_graph_runs_parallel_workers_and_reviews() -> None:
 
     assert result.status == RunStatus.SUCCEEDED
     assert len(result.artifacts) == 2
-    assert len(result.reviews) == 6
+    assert len(result.reviews) == 2
+    assert {item.dimension for item in result.reviews} == {"comprehensive"}
     assert result.output
-    assert len(result.model_calls) == 11
+    assert len(result.model_calls) == 7
     assert result.usage.input_tokens > 0
 
 
@@ -42,6 +44,12 @@ async def test_high_risk_run_interrupts_and_resumes() -> None:
         )
         waiting = await manager.wait(run_id)
         assert waiting.status == RunStatus.WAITING_HUMAN
+        assert len(waiting.reviews) == 6
+        assert {item.dimension for item in waiting.reviews} == {
+            "fact",
+            "logic",
+            "constraint",
+        }
 
         await manager.resume(run_id, approved=True, note="test approval")
         completed = await manager.wait(run_id)
@@ -82,6 +90,24 @@ async def test_functional_assignment_routes_homogeneous_agents() -> None:
     }
     assert len(result.reviews) == 2
     assert {item.dimension for item in result.reviews} == {"constraint"}
+
+
+@pytest.mark.asyncio
+async def test_decision_task_uses_deep_review() -> None:
+    async with build_runtime(PROJECT_ROOT, checkpoint_backend="memory") as runtime:
+        manager = RunManager(runtime)
+        run_id = await manager.start(
+            TaskRequest(goal="Compare two delivery options", task_type="decision")
+        )
+        result = await manager.wait(run_id)
+
+    assert result.status == RunStatus.SUCCEEDED
+    assert len(result.reviews) == 6
+    assert {item.dimension for item in result.reviews} == {
+        "fact",
+        "logic",
+        "constraint",
+    }
 
 
 @pytest.mark.asyncio
@@ -232,3 +258,33 @@ async def test_recovery_resumes_claimed_checkpoint_state() -> None:
 
     assert graph.resumed is True
     assert result.status == RunStatus.SUCCEEDED
+
+
+@pytest.mark.asyncio
+async def test_run_manager_bounds_concurrent_graph_runs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original_complete = MockProvider.complete
+
+    async def delayed_complete(self, request, *, model):
+        await asyncio.sleep(0.02)
+        return await original_complete(self, request, model=model)
+
+    monkeypatch.setattr(MockProvider, "complete", delayed_complete)
+    async with build_runtime(PROJECT_ROOT, checkpoint_backend="memory") as runtime:
+        runtime.config.runtime.run_max_concurrency = 1
+        manager = RunManager(runtime)
+        first = await manager.start(TaskRequest(goal="First bounded run"))
+        second = await manager.start(TaskRequest(goal="Second bounded run"))
+        await asyncio.sleep(0.01)
+
+        assert manager.stats()["active_runs"] == 1
+        assert manager.stats()["queued_runs"] == 1
+
+        first_result, second_result = await asyncio.gather(
+            manager.wait(first),
+            manager.wait(second),
+        )
+
+    assert first_result.status == RunStatus.SUCCEEDED
+    assert second_result.status == RunStatus.SUCCEEDED

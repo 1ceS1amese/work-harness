@@ -4,6 +4,7 @@ import { CircleCheck, Delete, EditPen, Plus, Refresh } from '@element-plus/icons
 import { ElMessage } from 'element-plus'
 
 import { harnessApi } from '../services/api'
+import { logicalModelLabel } from '../utils/labels'
 import type {
   AgentDescriptor,
   ProviderApiFamily,
@@ -28,6 +29,7 @@ interface ProviderFormState {
   chatTokenParameter: ChatTokenParameter
   storeResponses: boolean
   timeoutSeconds: number
+  maxConcurrency: number
   allowInsecureHttp: boolean
   allowPrivateNetwork: boolean
   options: Record<string, unknown>
@@ -51,13 +53,13 @@ const restartRequired = ref(false)
 
 const form = reactive<ProviderFormState>(emptyForm())
 const bindTargets = computed(() => [
-  { id: 'main', displayName: '主协调组', description: 'Normalizer、Planner、Reviewer、Judge 与 Synthesizer' },
+  { id: 'main', displayName: '任务管家和检查组', description: '负责读懂需求、安排分工、检查结果和整理回复' },
   ...props.agents
     .filter((agent) => agent.assignable)
     .map((agent) => ({
       id: agent.id,
       displayName: agent.display_name,
-      description: agent.id,
+      description: '可以单独选择自己的模型',
     })),
 ])
 const availableModels = computed(() =>
@@ -78,6 +80,7 @@ function emptyForm(): ProviderFormState {
     chatTokenParameter: '',
     storeResponses: false,
     timeoutSeconds: 60,
+    maxConcurrency: 8,
     allowInsecureHttp: false,
     allowPrivateNetwork: false,
     options: {},
@@ -111,6 +114,7 @@ function startEdit(provider: ProviderDescriptor): void {
     chatTokenParameter: config.chat_token_parameter ?? '',
     storeResponses: config.store_responses,
     timeoutSeconds: config.timeout_seconds,
+    maxConcurrency: config.max_concurrency,
     allowInsecureHttp: config.allow_insecure_http,
     allowPrivateNetwork: config.allow_private_network,
     options: { ...config.options },
@@ -136,14 +140,14 @@ function compactBindings(bindings: Record<string, string>): Record<string, strin
 
 function validateForm(): string | null {
   if (!/^[a-z][a-z0-9_-]{1,63}$/.test(form.name)) {
-    return 'Provider 名称需以小写字母开头，只能包含小写字母、数字、- 和 _'
+    return '模型服务名称需以小写字母开头，只能包含小写字母、数字、- 和 _'
   }
   if (availableModels.value.length === 0) return '至少需要一个可用模型 ID'
   if (form.enabled && !form.baseUrl.trim() && !form.baseUrlEnv.trim()) {
-    return '启用 Provider 前需要配置 Base URL 或 Base URL 环境变量名'
+    return '启用模型服务前，需要配置 Base URL 或对应的环境变量名'
   }
   if (form.enabled && !form.apiKeyEnv.trim()) {
-    return '启用 Provider 前需要填写 API Key 环境变量名'
+    return '启用模型服务前，需要填写 API Key 环境变量名'
   }
   const allowed = new Set(availableModels.value)
   const unavailable = [
@@ -170,6 +174,7 @@ function profilePayload(): ProviderProfileSpec {
       allowed_models: availableModels.value,
       capabilities: ['chat', 'structured_output', 'tool_calling'],
       timeout_seconds: form.timeoutSeconds,
+      max_concurrency: form.maxConcurrency,
       allow_insecure_http: form.allowInsecureHttp,
       allow_private_network: form.allowPrivateNetwork,
       options: { ...form.options },
@@ -186,7 +191,7 @@ async function loadProviders(): Promise<void> {
     providers.value = response.items
     restartRequired.value = response.restart_required
   } catch (error) {
-    ElMessage.error(error instanceof Error ? error.message : '无法读取 Provider 配置')
+    ElMessage.error(error instanceof Error ? error.message : '无法读取模型服务配置')
   } finally {
     loading.value = false
   }
@@ -205,9 +210,9 @@ async function saveProvider(): Promise<void> {
     await loadProviders()
     editing.value = false
     emit('changed')
-    ElMessage.success(`Provider ${form.name} 已保存`)
+    ElMessage.success(`模型服务 ${form.name} 已保存`)
   } catch (error) {
-    ElMessage.error(error instanceof Error ? error.message : 'Provider 保存失败')
+    ElMessage.error(error instanceof Error ? error.message : '模型服务保存失败')
   } finally {
     saving.value = false
   }
@@ -218,9 +223,9 @@ async function deleteProvider(provider: ProviderDescriptor): Promise<void> {
     await harnessApi.deleteProvider(provider.name)
     await loadProviders()
     emit('changed')
-    ElMessage.success(`Provider ${provider.name} 的持久化覆盖已删除`)
+    ElMessage.success(`模型服务 ${provider.name} 的自定义配置已删除`)
   } catch (error) {
-    ElMessage.error(error instanceof Error ? error.message : 'Provider 删除失败')
+    ElMessage.error(error instanceof Error ? error.message : '模型服务删除失败')
   }
 }
 
@@ -251,8 +256,8 @@ watch(open, (value) => {
   <el-drawer v-model="open" size="min(760px, 96vw)" class="provider-drawer">
     <template #header>
       <div class="drawer-title provider-drawer-title">
-        <span>Provider 与模型路由</span>
-        <code>自定义 OpenAI 协议 / DeepSeek 方言</code>
+        <span>模型服务与成员分配</span>
+        <code>兼容 OpenAI 协议 / DeepSeek 方言</code>
       </div>
     </template>
 
@@ -260,7 +265,7 @@ watch(open, (value) => {
       <el-alert
         v-if="restartRequired"
         title="已保存的配置尚未装载"
-        description="请在安全结束当前任务后重启 Work Harness。运行中不会热切换 Provider。"
+        description="请等当前任务结束后再重启 Work Harness，正在处理的任务不会中途切换模型服务。"
         type="warning"
         show-icon
         :closable="false"
@@ -276,17 +281,17 @@ watch(open, (value) => {
       <template v-if="!editing">
         <div class="provider-toolbar">
           <div>
-            <strong>已配置 Provider</strong>
+            <strong>已配置的模型服务</strong>
             <small>YAML 默认值与 SQLite 覆盖会在启动时合并</small>
           </div>
           <span>
-            <el-button :icon="Refresh" circle aria-label="刷新 Provider" @click="loadProviders" />
+            <el-button :icon="Refresh" circle aria-label="刷新模型服务" @click="loadProviders" />
             <el-button type="primary" :icon="Plus" @click="startCreate">新建</el-button>
           </span>
         </div>
 
         <el-skeleton v-if="loading" :rows="5" animated />
-        <el-empty v-else-if="providers.length === 0" description="暂无 Provider 配置" />
+        <el-empty v-else-if="providers.length === 0" description="还没有配置模型服务" />
         <div v-else class="provider-list">
           <article v-for="provider in providers" :key="provider.name" class="provider-card">
             <div class="provider-card-heading">
@@ -331,6 +336,7 @@ watch(open, (value) => {
               <span><b>端点</b>{{ provider.config.base_url || provider.config.base_url_env || '未配置' }}</span>
               <span><b>密钥变量</b>{{ provider.config.api_key_env || '未配置' }}</span>
               <span><b>模型</b>{{ provider.config.allowed_models.join('、') || '无' }}</span>
+              <span><b>并发上限</b>{{ provider.config.max_concurrency }}</span>
             </div>
 
             <div
@@ -362,7 +368,7 @@ watch(open, (value) => {
       <el-form v-else label-position="top" class="provider-form" @submit.prevent>
         <div class="provider-form-heading">
           <div>
-            <strong>{{ editingExisting ? `编辑 ${form.name}` : '新建自定义 Provider' }}</strong>
+            <strong>{{ editingExisting ? `编辑 ${form.name}` : '添加自定义模型服务' }}</strong>
             <small>OpenAI 仅表示协议类型，不限定服务商或模型名称</small>
           </div>
           <el-button text @click="cancelEdit">返回列表</el-button>
@@ -371,7 +377,7 @@ watch(open, (value) => {
         <section class="provider-form-section">
           <h3>基本配置</h3>
           <div class="provider-form-grid">
-            <el-form-item label="Provider 名称">
+            <el-form-item label="模型服务名称">
               <el-input
                 v-model="form.name"
                 :disabled="editingExisting"
@@ -409,6 +415,9 @@ watch(open, (value) => {
             </el-form-item>
             <el-form-item label="超时（秒）">
               <el-input-number v-model="form.timeoutSeconds" :min="1" :max="600" />
+            </el-form-item>
+            <el-form-item label="最大并发请求">
+              <el-input-number v-model="form.maxConcurrency" :min="1" :max="256" />
             </el-form-item>
           </div>
           <el-form-item label="可用模型 ID">
@@ -457,10 +466,13 @@ watch(open, (value) => {
 
         <section class="provider-form-section">
           <h3>逻辑模型默认映射</h3>
-          <p>将这个 Provider 加入相应逻辑角色的候选集。</p>
+          <p>告诉系统每类工作默认可以用这个服务里的哪个模型。</p>
           <div class="binding-list">
             <label v-for="logical in logicalModels" :key="logical">
-              <span>{{ logical }}</span>
+              <span>
+                <strong>{{ logicalModelLabel(logical) }}</strong>
+                <small>{{ logical }}</small>
+              </span>
               <el-select
                 v-model="form.modelBindings[logical]"
                 clearable
@@ -478,8 +490,8 @@ watch(open, (value) => {
         </section>
 
         <section class="provider-form-section">
-          <h3>主 Agent 与子 Agent 独立路由</h3>
-          <p>具体 Agent 绑定优先于逻辑模型默认候选；Skill 显式固定 Provider 时仍以任务选择为准。</p>
+          <h3>任务管家和群成员单独选模型</h3>
+          <p>这里的单独设置会优先使用；如果某项能力已经点名模型服务，就按那次任务的选择来。</p>
           <div class="binding-list">
             <label v-for="target in bindTargets" :key="target.id">
               <span>

@@ -146,6 +146,7 @@ export interface ToolCallRecord {
   output_summary: string
   truncated: boolean
   duration_ms: number
+  cache_hit: boolean
 }
 
 export interface RunError {
@@ -184,6 +185,12 @@ export interface HealthResponse {
   run_store: string
   provider_store: string
   provider_compatible: boolean
+  scheduler: {
+    active_runs: number
+    queued_runs: number
+    stream_subscribers: number
+    run_max_concurrency: number
+  }
 }
 
 export interface ProviderCompatibilityItem {
@@ -216,6 +223,7 @@ export interface ProviderConfig {
   allowed_models: string[]
   capabilities: string[]
   timeout_seconds: number
+  max_concurrency: number
   allow_insecure_http: boolean
   allow_private_network: boolean
   options: Record<string, unknown>
@@ -277,6 +285,12 @@ export interface CapabilitiesResponse {
   skills: SkillDescriptor[]
   task_types: string[]
   allocation_modes: AllocationMode[]
+  runtime_policy: {
+    review_strategy: 'adaptive' | 'comprehensive' | 'three_dimensional'
+    deep_review_risk_levels: RiskLevel[]
+    deep_review_task_types: string[]
+    run_max_concurrency: number
+  }
   functions: AgentFunctionDescriptor[]
   agents: AgentDescriptor[]
 }

@@ -13,6 +13,27 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - A production-grade shared database and task queue for multi-instance deployments.
 - Server-side conversations, tenant isolation, and organization identity integration.
 
+## 0.2.1 - 2026-08-19
+
+### Added
+
+- Run-level and per-Provider concurrency backpressure, with scheduler statistics in health output.
+- Run-scoped caching for idempotent Tools and cache-hit visibility in Tool call records.
+- ASGI-native request-size and per-client rate guards, deterministic Trace sampling, and a
+  repeatable backend benchmark reporting throughput, percentiles, model calls, and RSS.
+
+### Changed
+
+- The browser workbench now uses a QQ/WeChat-style group-chat layout with conversation and member
+  sidebars, left/right avatar bubbles, and conversational Chinese labels for agent functions,
+  workflow stages, skills, and model routing.
+- Ordinary low- and medium-risk runs now use one comprehensive review per artifact by default,
+  while high/critical-risk and research/decision runs retain independent fact, logic, and
+  constraint reviews.
+- SSE snapshots are now driven by LangGraph node updates instead of polling complete checkpoints
+  every 250 milliseconds.
+- LangGraph `Send` payloads contain only node-local inputs, reducing repeated state fan-out.
+
 ## 0.2.0 - 2026-08-19
 
 ### Added

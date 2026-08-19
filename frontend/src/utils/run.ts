@@ -26,25 +26,25 @@ export const STATUS_LABELS: Record<RunStatus, string> = {
 
 export function getRunStage(run: RunResult): RunStage {
   if (run.status === 'succeeded') {
-    return { label: '已完成', description: '结果已汇总，可以查看运行详情。', progress: 100 }
+    return { label: '都搞定了', description: '大家已经把结果整理好了。', progress: 100 }
   }
   if (run.status === 'partial') {
-    return { label: '部分完成', description: '部分结果已汇总，请检查未解决项。', progress: 100 }
+    return { label: '先完成了一部分', description: '能做的部分已经整理好了，还有些问题需要留意。', progress: 100 }
   }
   if (run.status === 'failed') {
-    return { label: '运行失败', description: '执行未完成，请在详情中查看错误。', progress: 100 }
+    return { label: '这次没做完', description: '处理时碰到了问题，可以看看详细记录。', progress: 100 }
   }
   if (run.status === 'cancelled') {
-    return { label: '已取消', description: '运行已安全停止。', progress: 100 }
+    return { label: '已经停下来了', description: '大家已经停止处理这件事。', progress: 100 }
   }
   if (run.status === 'waiting_human') {
-    return { label: '等待你的确认', description: '高风险步骤已暂停，确认后才会继续。', progress: 90 }
+    return { label: '等你确认', description: '这一步风险比较高，大家先等你点头。', progress: 90 }
   }
   if (!run.task) {
-    return { label: '理解任务', description: '正在规范化目标与约束…', progress: 10 }
+    return { label: '正在看你的消息', description: '先把你想做的事和需要注意的地方捋清楚…', progress: 10 }
   }
   if (!run.plan) {
-    return { label: '制定计划', description: '正在拆分任务并安排执行顺序…', progress: 24 }
+    return { label: '正在安排分工', description: '任务管家正在拆分事情，再叫合适的成员来做…', progress: 24 }
   }
 
   const subtaskTotal = Math.max(run.plan.subtasks.length, 1)
@@ -52,13 +52,16 @@ export function getRunStage(run: RunResult): RunStage {
   if (completedSubtasks < subtaskTotal) {
     const progress = 32 + Math.round((completedSubtasks / subtaskTotal) * 26)
     return {
-      label: '并行执行',
-      description: `已完成 ${completedSubtasks}/${subtaskTotal} 个子任务…`,
+      label: '大家正在处理',
+      description: `已经完成 ${completedSubtasks}/${subtaskTotal} 份分工…`,
       progress,
     }
   }
 
-  const reviewDimensions = run.task?.assignment.cross_review === false ? 1 : 3
+  const deepReview =
+    ['high', 'critical'].includes(run.task?.risk_level ?? 'low') ||
+    ['research', 'decision'].includes(run.task?.task_type ?? 'general')
+  const reviewDimensions = run.task?.assignment.cross_review === false ? 1 : deepReview ? 3 : 1
   const expectedReviews = subtaskTotal * reviewDimensions
   const latestReviews = new Set(
     run.reviews.map((item) => `${item.artifact_id}:${item.artifact_version}:${item.dimension}`),
@@ -66,15 +69,15 @@ export function getRunStage(run: RunResult): RunStage {
   if (latestReviews < expectedReviews) {
     const progress = 60 + Math.round((latestReviews / expectedReviews) * 20)
     return {
-      label: '交叉复核',
-      description: `已完成 ${latestReviews}/${expectedReviews} 项独立检查…`,
+      label: '大家正在互相检查',
+      description: `已经检查了 ${latestReviews}/${expectedReviews} 项…`,
       progress,
     }
   }
   if (!run.decision) {
-    return { label: '质量裁决', description: '正在判断通过、返工或升级人工处理…', progress: 84 }
+    return { label: '正在做最后检查', description: '看看能不能直接交付，还是需要再补一补…', progress: 84 }
   }
-  return { label: '汇总结果', description: '正在组织最终答复与证据…', progress: 94 }
+  return { label: '正在整理回复', description: '把大家的结果合在一起，马上发给你…', progress: 94 }
 }
 
 export function resultMessage(run: RunResult): string {

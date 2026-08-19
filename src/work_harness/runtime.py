@@ -91,6 +91,7 @@ def _build_runtime(
     tool_gateway = ToolGateway(
         registry,
         global_max_result_chars=config.runtime.max_tool_result_chars,
+        cache_max_entries=config.runtime.tool_cache_max_entries,
     )
     prompts = PromptRegistry(config.project_root / "prompts")
     skill_registry = SkillRegistry(config.project_root / "skills")
@@ -101,7 +102,10 @@ def _build_runtime(
         registry,
         assignable_roles=assignable_roles,
     )
-    trace = TraceRecorder(enabled=config.runtime.trace.enabled)
+    trace = TraceRecorder(
+        enabled=config.runtime.trace.enabled,
+        sample_rate=config.runtime.trace.sample_rate,
+    )
     graph = build_root_graph(
         config=config,
         gateway=gateway,

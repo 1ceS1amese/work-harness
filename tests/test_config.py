@@ -21,6 +21,9 @@ def test_configuration_references_are_valid() -> None:
     assert config.models.profile == "local"
     assert "planner-strong" in config.models.logical_models
     assert config.runtime.max_repair_rounds == 1
+    assert config.runtime.run_max_concurrency == 4
+    assert config.runtime.review_strategy == "adaptive"
+    assert config.runtime.deep_review_task_types == {"research", "decision"}
     assert config.runtime.run_store.backend == "sqlite"
     assert config.runtime.run_store.path == "var/runs.sqlite"
     assert config.runtime.provider_store.path == "var/providers.sqlite"
@@ -44,6 +47,7 @@ def test_production_profile_disables_mock_and_enables_auth(monkeypatch) -> None:
     assert config.models.providers["compatible"].enabled is True
     assert config.api.auth_enabled is True
     assert config.api.expose_docs is False
+    assert config.runtime.trace.sample_rate == 0.1
     assert all(
         logical.candidates[0].provider == "compatible"
         for logical in config.models.logical_models.values()

@@ -16,9 +16,9 @@ Provider layer targets custom OpenAI-compatible model endpoints rather than a si
 OpenAI protocol and DeepSeek dialects can use either Chat Completions or Responses, while the
 root agent and every assignable child agent can have independent Provider and model routes.
 
-The current release is alpha software. It is usable for local development, contract testing,
-single-instance deployment, and manual real-model evaluation. It is not yet a multi-tenant or
-horizontally scalable production service.
+The current release supports hardened single-instance production deployment and manual real-model
+evaluation. Its SQLite storage and shared deployment API key deliberately do not provide
+multi-tenant identity or horizontal scaling.
 
 ## Table of Contents
 
@@ -37,9 +37,11 @@ horizontally scalable production service.
 
 ## Security
 
-Never place model credentials in YAML, Provider Profiles, frontend build variables, logs, or
-SQLite records. Provider Profiles store only environment variable names. Use `secure` or
-`production` with HTTPS before exposing the service outside a trusted machine.
+Never place model credentials in YAML, frontend build variables, or logs. A Provider can read its
+key from a named environment variable, or accept it through the authenticated settings UI. UI
+keys are encrypted before SQLite persistence with a separate `providers.sqlite.key` file and are
+never returned by the API. Use `secure` or `production` with HTTPS before exposing the service
+outside a trusted machine, and protect both the data volume and backups.
 
 The built-in API Key is a shared deployment secret, not user identity or tenant isolation.
 SQLite is supported for one application process only. See [SECURITY.md](SECURITY.md) for the
@@ -120,7 +122,7 @@ Skills. Download the wheel from the [latest GitHub Release](https://github.com/1
 The browser UI is distributed in the container image and source checkout.
 
 ```bash
-python -m pip install work_harness-0.2.1-py3-none-any.whl
+python -m pip install work_harness-0.2.2-py3-none-any.whl
 work-harness check-config
 work-harness serve --host 127.0.0.1 --port 8000
 ```
@@ -158,15 +160,19 @@ instead of the packaged defaults.
 
 ### Custom Providers
 
-Provider settings can be staged in the web UI without storing a credential value:
+Provider settings can be staged in the web UI with either credential channel:
 
 1. choose `openai` or `deepseek` protocol behavior;
 2. choose `chat_completions` or `responses`;
 3. allowlist real model IDs;
 4. map logical models, the main coordination group, and individual `worker-*` agents;
-5. reference Base URL and API Key environment variable names;
-6. add those variables to the runtime environment;
-7. enable the Profile and restart the service.
+5. choose environment injection and reference an API Key variable, or choose encrypted UI storage
+   and enter the key once;
+6. enable the Profile and restart the service.
+
+Environment injection remains the recommended channel for automated secret managers. UI storage
+is useful for interactive installations: the browser sends the key only on save, a blank field
+keeps the existing value, and reads expose only `credential_configured`.
 
 The `main` agent binding expands to the normalizer, planner, reviewer, judge, and synthesizer.
 Specific child-agent bindings override the logical model's default route. A task-level Skill
@@ -238,35 +244,43 @@ and ProviderStore currently use SQLite.
 ./scripts/compose.sh down
 ```
 
-For public HTTPS, create `.env` and `deploy/runtime.env`, select `secure` or `production`, configure
-a real domain and deployment API Key, then run:
+For a source-based HTTPS production deployment, generate the private configuration templates,
+replace the deployment key and domain, then start the stack:
 
 ```bash
-./scripts/compose.sh public
+./scripts/compose.sh init-production
+# edit .env and deploy/runtime.env
+./scripts/compose.sh production
+./scripts/compose.sh ready
 ```
 
-Use `./scripts/compose.sh install-public` instead when `WORK_HARNESS_IMAGE` points to a released
-GHCR image.
+Use `./scripts/compose.sh install-production` instead when `WORK_HARNESS_IMAGE` points to a released
+GHCR image. Model variables in `deploy/runtime.env` are optional: after the service starts in
+configuration mode, an administrator can save an encrypted Provider key in the settings page and
+restart with `./scripts/compose.sh reload`.
 
-The public command refuses the local profile, an example domain, or an empty deployment key.
-Read the complete [Docker Compose deployment guide](docs/docker-deployment.md) before exposing a
-host. Do not use `docker compose down -v` unless you explicitly intend to delete durable state.
+Production commands refuse the local profile, an example domain, weak deployment keys, or a
+partially configured environment Provider. Read the complete
+[Docker Compose deployment guide](docs/docker-deployment.md) before exposing a host. Do not use
+`docker compose down -v` unless you explicitly intend to delete durable state.
 
 ## Project Status
 
-Version `0.2.1` currently provides:
+The current source tree provides:
 
-- 66 backend tests and 14 frontend tests;
+- 71 backend tests and 15 frontend tests;
 - adaptive review that keeps three-dimensional checks for high-risk work while reducing the
   deterministic low-risk workflow from 11 to 7 model calls;
 - event-driven SSE snapshots, bounded run/Provider concurrency, and run-scoped idempotent Tool
   caching;
 - a 10/10 deterministic Mock workflow evaluation;
-- durable Provider Profiles and per-agent model routes;
+- durable Provider Profiles, encrypted interactive credentials, environment-injected credentials,
+  and per-agent model routes;
 - single-instance restart recovery with leases and heartbeats;
 - a read-only workspace Tool and two executable example Skills;
 - a self-contained Windows x64 executable with external durable state;
-- Compose deployment, optional Caddy HTTPS, liveness checks, and consistent SQLite backups.
+- production-validated Compose deployment, Caddy HTTPS and security headers, liveness/readiness
+  separation, resource limits, and consistent SQLite plus credential-key backups.
 
 Real-provider credentials are intentionally not included. Multi-instance storage, a reliable task
 queue, server-side conversations, organization identity, and business Tools remain future work.
@@ -278,6 +292,7 @@ See [development status](docs/development-status.md) and [CHANGELOG.md](CHANGELO
 | --- | --- | --- |
 | `GET` | `/health/live` | Unauthenticated process liveness |
 | `GET` | `/health` | Provider and storage readiness summary |
+| `GET` | `/health/ready` | Deployment readiness; returns 503 until enabled Providers are usable |
 | `GET` | `/v1/capabilities` | Agents, functions, models, Tools, and Skills |
 | `GET` | `/v1/compatibility` | Provider, adapter, Tool, and Skill report |
 | `GET` | `/v1/providers` | Effective and persisted Provider Profiles |

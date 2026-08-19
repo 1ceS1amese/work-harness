@@ -55,7 +55,7 @@ def test_production_profile_disables_mock_and_enables_auth(monkeypatch) -> None:
 
 
 def test_provider_options_reject_embedded_credentials() -> None:
-    with pytest.raises(ValidationError, match="use api_key_env"):
+    with pytest.raises(ValidationError, match="credential channel"):
         ProviderConfig(
             adapter="openai_compatible",
             enabled=False,
@@ -68,3 +68,18 @@ def test_provider_options_reject_embedded_credentials() -> None:
             enabled=False,
             base_url="https://user:password@api.example.test/v1",
         )
+
+
+def test_stored_provider_credential_does_not_require_environment_name() -> None:
+    config = ProviderConfig(
+        adapter="openai_compatible",
+        enabled=True,
+        base_url="https://models.example.test/v1",
+        credential_source="stored",
+        allowed_models=["configured-model"],
+        capabilities={"chat", "structured_output", "tool_calling"},
+    )
+
+    assert config.api_key_env is None
+    assert config.runtime_api_key() == ""
+    assert "runtime_api_key" not in config.model_dump()

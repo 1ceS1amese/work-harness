@@ -4,6 +4,7 @@ set -eu
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 PROJECT_ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
 RUNTIME_ENV="$PROJECT_ROOT/deploy/runtime.env"
+COMPOSE_ENV="$PROJECT_ROOT/.env"
 
 compose() {
   docker compose --project-directory "$PROJECT_ROOT" -f "$PROJECT_ROOT/compose.yaml" "$@"
@@ -64,10 +65,50 @@ validate_public_config() {
   fi
 }
 
+validate_production_config() {
+  PROFILE=${WORK_HARNESS_PROFILE:-$(file_value "$COMPOSE_ENV" WORK_HARNESS_PROFILE)}
+  API_KEY=$(file_value "$RUNTIME_ENV" WORK_HARNESS_API_KEY)
+  MODEL_BASE_URL=$(file_value "$RUNTIME_ENV" MODEL_BASE_URL)
+  MODEL_API_KEY=$(file_value "$RUNTIME_ENV" MODEL_API_KEY)
+
+  if [ "$PROFILE" != "production" ]; then
+    echo "错误：真实部署必须设置 WORK_HARNESS_PROFILE=production。" >&2
+    exit 1
+  fi
+  if [ ${#API_KEY} -lt 32 ]; then
+    echo "错误：WORK_HARNESS_API_KEY 至少需要 32 个字符。" >&2
+    exit 1
+  fi
+  if { [ -n "$MODEL_BASE_URL" ] && [ -z "$MODEL_API_KEY" ]; } || \
+     { [ -z "$MODEL_BASE_URL" ] && [ -n "$MODEL_API_KEY" ]; }; then
+    echo "错误：环境变量 Provider 必须同时设置 MODEL_BASE_URL 和 MODEL_API_KEY。" >&2
+    exit 1
+  fi
+  case "$MODEL_BASE_URL" in
+    *example.com*|*example.test*)
+      echo "错误：MODEL_BASE_URL 仍是示例地址；留空改用页面配置，或填写真实端点。" >&2
+      exit 1
+      ;;
+  esac
+}
+
+init_production() {
+  if [ -e "$COMPOSE_ENV" ] || [ -e "$RUNTIME_ENV" ]; then
+    echo "错误：.env 或 deploy/runtime.env 已存在，为避免覆盖请先手动确认。" >&2
+    exit 1
+  fi
+  cp "$PROJECT_ROOT/.env.production.example" "$COMPOSE_ENV"
+  cp "$PROJECT_ROOT/deploy/runtime.production.env.example" "$RUNTIME_ENV"
+  chmod 600 "$COMPOSE_ENV" "$RUNTIME_ENV"
+  echo "已创建生产配置模板。请填写真实域名和至少 32 字符的部署 API Key。"
+  echo "模型服务可稍后在网页的“模型服务与成员分配”中添加。"
+  echo "使用发布镜像时，还需把 WORK_HARNESS_IMAGE 改为不可变的 GHCR 版本标签。"
+}
+
 validate_release_image() {
   IMAGE=${WORK_HARNESS_IMAGE:-$(file_value "$PROJECT_ROOT/.env" WORK_HARNESS_IMAGE)}
   case "$IMAGE" in
-    ""|work-harness:local)
+    ""|work-harness:local|work-harness:production-local)
       echo "错误：安装发布镜像前，请在 .env 或当前环境设置版本化 WORK_HARNESS_IMAGE。" >&2
       exit 1
       ;;
@@ -83,12 +124,16 @@ usage() {
   install  拉取 WORK_HARNESS_IMAGE 并等待服务健康（不进行本地构建）
   public   同时启动 Caddy，为已解析的域名自动配置 HTTPS
   install-public  使用发布镜像并同时启动 Caddy HTTPS
+  init-production  创建不会覆盖现有文件的生产配置模板
+  production  使用当前源码启动真实 Provider + Caddy HTTPS
+  install-production  使用发布镜像启动真实 Provider + Caddy HTTPS
   update   拉取基础镜像、重新构建并替换单实例容器
   reload   重新创建容器，加载最新环境变量和 Provider Profile
   check    校验 Compose 与应用配置
+  ready    检查模型 Provider 是否已经可接收真实任务
   status   显示容器状态
   logs     持续查看日志
-  backup   在线备份三个 SQLite 数据库到 backups/
+  backup   在线备份三个 SQLite 数据库和 Provider 加密密钥到 backups/
   down     停止服务并保留持久化卷
 EOF
 }
@@ -130,6 +175,29 @@ case "$COMMAND" in
     compose --profile public up --detach --no-build --wait --wait-timeout 180
     compose --profile public ps
     ;;
+  init-production)
+    init_production
+    ;;
+  production)
+    require_docker
+    prepare_runtime_env
+    validate_production_config
+    validate_public_config
+    compose --profile public config --quiet
+    compose --profile public up --detach --build --wait --wait-timeout 180
+    compose --profile public ps
+    ;;
+  install-production)
+    require_docker
+    prepare_runtime_env
+    validate_release_image
+    validate_production_config
+    validate_public_config
+    compose --profile public config --quiet
+    compose --profile public pull
+    compose --profile public up --detach --no-build --wait --wait-timeout 180
+    compose --profile public ps
+    ;;
   update)
     require_docker
     prepare_runtime_env
@@ -148,6 +216,11 @@ case "$COMMAND" in
     prepare_runtime_env
     compose config --quiet
     compose run --rm --no-deps work-harness check-config
+    ;;
+  ready)
+    require_docker
+    compose exec -T work-harness python -c \
+      "import json, os, urllib.request; request=urllib.request.Request('http://127.0.0.1:8000/health/ready', headers={'X-API-Key': os.getenv('WORK_HARNESS_API_KEY', '')}); print(json.load(urllib.request.urlopen(request, timeout=5)))"
     ;;
   status)
     require_docker

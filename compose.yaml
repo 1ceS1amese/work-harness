@@ -36,6 +36,13 @@ services:
     security_opt:
       - no-new-privileges:true
     pids_limit: 256
+    cpus: ${WORK_HARNESS_CPUS:-2.0}
+    mem_limit: ${WORK_HARNESS_MEMORY_LIMIT:-2g}
+    mem_reservation: ${WORK_HARNESS_MEMORY_RESERVATION:-512m}
+    ulimits:
+      nofile:
+        soft: 4096
+        hard: 8192
     # Runtime requests are capped at 300s; allow an in-flight run to close cleanly.
     stop_grace_period: 330s
     healthcheck:
@@ -78,6 +85,9 @@ services:
       - /tmp:rw,noexec,nosuid,size=32m
     security_opt:
       - no-new-privileges:true
+    pids_limit: 128
+    cpus: ${WORK_HARNESS_CADDY_CPUS:-0.5}
+    mem_limit: ${WORK_HARNESS_CADDY_MEMORY_LIMIT:-256m}
     logging:
       driver: json-file
       options:

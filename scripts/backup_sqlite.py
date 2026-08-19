@@ -3,11 +3,13 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import shutil
 import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
 
 DATABASES = ("checkpoints.sqlite", "runs.sqlite", "providers.sqlite")
+PROVIDER_KEY = "providers.sqlite.key"
 
 
 def file_sha256(path: Path) -> str:
@@ -47,6 +49,19 @@ def main() -> int:
                 "name": name,
                 "size": destination.stat().st_size,
                 "sha256": file_sha256(destination),
+            }
+        )
+
+    provider_key = source_dir / PROVIDER_KEY
+    if provider_key.is_file():
+        key_destination = destination_dir / PROVIDER_KEY
+        shutil.copyfile(provider_key, key_destination)
+        key_destination.chmod(0o600)
+        files.append(
+            {
+                "name": PROVIDER_KEY,
+                "size": key_destination.stat().st_size,
+                "sha256": file_sha256(key_destination),
             }
         )
 

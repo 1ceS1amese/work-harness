@@ -19,6 +19,7 @@ providers:
     api_family: chat_completions
     enabled: false
     base_url_env: MODEL_BASE_URL
+    credential_source: environment
     api_key_env: MODEL_API_KEY
     allowed_models: [configured-model]
     capabilities: [chat, structured_output, tool_calling]

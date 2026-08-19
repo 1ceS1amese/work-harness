@@ -134,6 +134,16 @@ async def _close_providers(runtime: HarnessRuntime) -> None:
     await runtime.model_gateway.close()
 
 
+async def _attach_stored_provider_credentials(
+    config: AppConfig,
+    provider_store: ProviderProfileStore,
+) -> None:
+    for name, provider in config.models.providers.items():
+        if provider.credential_source != "stored":
+            continue
+        provider.set_runtime_api_key(await provider_store.get_api_key(name))
+
+
 @asynccontextmanager
 async def build_runtime(
     project_root: Path | str | None = None,
@@ -168,6 +178,7 @@ async def build_runtime(
         await run_store.initialize()
         await provider_store.initialize()
         config = apply_provider_profiles(config, await provider_store.list())
+        await _attach_stored_provider_credentials(config, provider_store)
         configure_logging(config.runtime.trace.log_level)
         if backend == "memory":
             runtime = _build_runtime(

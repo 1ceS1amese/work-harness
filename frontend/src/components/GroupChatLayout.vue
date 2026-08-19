@@ -8,7 +8,7 @@ const mobileMenuOpen = defineModel<boolean>('mobileMenuOpen', { required: true }
 defineProps<{
   title: string
   connectionLabel: string
-  connectionState: 'checking' | 'online' | 'offline' | 'auth'
+  connectionState: 'checking' | 'online' | 'setup' | 'offline' | 'auth'
   members: AgentDescriptor[]
 }>()
 </script>

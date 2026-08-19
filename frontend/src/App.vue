@@ -63,7 +63,7 @@ const apiKeyConfigured = ref(harnessApi.hasApiKey())
 const authenticating = ref(false)
 const selectedRunId = ref<string | null>(null)
 const actionBusyRunId = ref<string | null>(null)
-const backendState = ref<'checking' | 'online' | 'offline' | 'auth'>('checking')
+const backendState = ref<'checking' | 'online' | 'setup' | 'offline' | 'auth'>('checking')
 const taskTypes = ref(['general', 'planning', 'decision', 'research', 'code'])
 const logicalModels = ref([
   'planner-strong',
@@ -196,6 +196,7 @@ const activeRunMessage = computed<ChatMessage | undefined>(() =>
 )
 const connectionLabel = computed(() => {
   if (backendState.value === 'online') return '系统就绪'
+  if (backendState.value === 'setup') return '等待配置模型服务'
   if (backendState.value === 'auth') return '需要登录'
   if (backendState.value === 'checking') return '正在连接'
   return '服务未连接'
@@ -322,11 +323,11 @@ async function pollRun(runId: string): Promise<void> {
 async function checkConnection(): Promise<boolean> {
   backendState.value = 'checking'
   try {
-    const [, capabilities] = await Promise.all([
+    const [health, capabilities] = await Promise.all([
       harnessApi.health(lifecycleController.signal),
       harnessApi.capabilities(lifecycleController.signal),
     ])
-    backendState.value = 'online'
+    backendState.value = health.status === 'ok' ? 'online' : 'setup'
     if (capabilities.task_types.length > 0) taskTypes.value = capabilities.task_types
     if (capabilities.logical_models.length > 0) logicalModels.value = capabilities.logical_models
     if (capabilities.functions?.length > 0) agentFunctions.value = capabilities.functions
@@ -388,6 +389,11 @@ async function refreshActiveConversation(): Promise<void> {
 async function sendTask(): Promise<void> {
   const goal = prompt.value.trim()
   if (!goal || sending.value) return
+  if (backendState.value === 'setup') {
+    providerSettingsOpen.value = true
+    ElMessage.warning('请先配置一个可用的模型服务，再发送任务')
+    return
+  }
   const conversationId = activeConversation.value.id
   const selectedTaskType = activeConversation.value.taskType
   const selectedRiskLevel = activeConversation.value.riskLevel

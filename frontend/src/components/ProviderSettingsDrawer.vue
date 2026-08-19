@@ -8,6 +8,7 @@ import { logicalModelLabel } from '../utils/labels'
 import type {
   AgentDescriptor,
   ProviderApiFamily,
+  ProviderCredentialSource,
   ProviderDescriptor,
   ProviderProfileSpec,
   ProviderProtocolVariant,
@@ -23,7 +24,11 @@ interface ProviderFormState {
   enabled: boolean
   baseUrl: string
   baseUrlEnv: string
+  credentialSource: ProviderCredentialSource
   apiKeyEnv: string
+  apiKey: string
+  credentialConfigured: boolean
+  clearApiKey: boolean
   allowedModels: string[]
   structuredOutputMode: StructuredOutputMode
   chatTokenParameter: ChatTokenParameter
@@ -74,7 +79,11 @@ function emptyForm(): ProviderFormState {
     enabled: false,
     baseUrl: '',
     baseUrlEnv: '',
+    credentialSource: 'stored',
     apiKeyEnv: '',
+    apiKey: '',
+    credentialConfigured: false,
+    clearApiKey: false,
     allowedModels: [],
     structuredOutputMode: '',
     chatTokenParameter: '',
@@ -108,7 +117,12 @@ function startEdit(provider: ProviderDescriptor): void {
     enabled: config.enabled,
     baseUrl: config.base_url ?? '',
     baseUrlEnv: config.base_url_env ?? '',
+    credentialSource: config.credential_source ?? 'environment',
     apiKeyEnv: config.api_key_env ?? '',
+    apiKey: '',
+    credentialConfigured:
+      config.credential_source === 'stored' && provider.credential_available === true,
+    clearApiKey: false,
     allowedModels: [...config.allowed_models],
     structuredOutputMode: config.structured_output_mode ?? '',
     chatTokenParameter: config.chat_token_parameter ?? '',
@@ -143,11 +157,27 @@ function validateForm(): string | null {
     return '模型服务名称需以小写字母开头，只能包含小写字母、数字、- 和 _'
   }
   if (availableModels.value.length === 0) return '至少需要一个可用模型 ID'
-  if (form.enabled && !form.baseUrl.trim() && !form.baseUrlEnv.trim()) {
+  if (
+    form.enabled
+    && !form.baseUrl.trim()
+    && (form.credentialSource !== 'environment' || !form.baseUrlEnv.trim())
+  ) {
     return '启用模型服务前，需要配置 Base URL 或对应的环境变量名'
   }
-  if (form.enabled && !form.apiKeyEnv.trim()) {
-    return '启用模型服务前，需要填写 API Key 环境变量名'
+  if (
+    form.enabled
+    && form.credentialSource === 'environment'
+    && !form.apiKeyEnv.trim()
+  ) {
+    return '使用环境变量时，需要填写 API Key 环境变量名'
+  }
+  if (
+    form.enabled
+    && form.credentialSource === 'stored'
+    && !form.apiKey.trim()
+    && (!form.credentialConfigured || form.clearApiKey)
+  ) {
+    return '使用内置密钥库时，需要填写 API Key'
   }
   const allowed = new Set(availableModels.value)
   const unavailable = [
@@ -169,8 +199,11 @@ function profilePayload(): ProviderProfileSpec {
       store_responses: form.storeResponses,
       enabled: form.enabled,
       base_url: form.baseUrl.trim() || null,
-      base_url_env: form.baseUrlEnv.trim() || null,
-      api_key_env: form.apiKeyEnv.trim() || null,
+      base_url_env:
+        form.credentialSource === 'environment' ? form.baseUrlEnv.trim() || null : null,
+      credential_source: form.credentialSource,
+      api_key_env:
+        form.credentialSource === 'environment' ? form.apiKeyEnv.trim() || null : null,
       allowed_models: availableModels.value,
       capabilities: ['chat', 'structured_output', 'tool_calling'],
       timeout_seconds: form.timeoutSeconds,
@@ -181,6 +214,9 @@ function profilePayload(): ProviderProfileSpec {
     },
     model_bindings: compactBindings(form.modelBindings),
     agent_bindings: compactBindings(form.agentBindings),
+    api_key:
+      form.credentialSource === 'stored' ? form.apiKey.trim() || undefined : undefined,
+    clear_api_key: form.clearApiKey || form.credentialSource === 'environment',
   }
 }
 
@@ -233,7 +269,7 @@ function statusLabel(provider: ProviderDescriptor): string {
   if (!provider.config.enabled) return '未启用'
   if (!provider.loaded) return '待重启'
   if (provider.endpoint_available === false) return '缺少端点'
-  if (provider.credential_available === false) return '缺少密钥环境变量'
+  if (provider.credential_available === false) return '缺少密钥'
   return '已就绪'
 }
 
@@ -271,8 +307,8 @@ watch(open, (value) => {
         :closable="false"
       />
       <el-alert
-        title="这里不保存 API Key"
-        description="只填写环境变量名，密钥值由你在启动进程时配置。建议先以“未启用”保存并检查路由。"
+        title="支持两种密钥方式"
+        description="可以在页面中保存到内置加密密钥库，也可以只填写环境变量名，由部署平台注入。API 不会回显密钥明文。"
         type="info"
         show-icon
         :closable="false"
@@ -334,7 +370,14 @@ watch(open, (value) => {
 
             <div class="provider-facts">
               <span><b>端点</b>{{ provider.config.base_url || provider.config.base_url_env || '未配置' }}</span>
-              <span><b>密钥变量</b>{{ provider.config.api_key_env || '未配置' }}</span>
+              <span>
+                <b>密钥方式</b>
+                {{
+                  provider.config.credential_source === 'stored'
+                    ? provider.credential_available ? '内置密钥库 · 已配置' : '内置密钥库 · 未配置'
+                    : `环境变量 · ${provider.config.api_key_env || '未配置'}`
+                }}
+              </span>
               <span><b>模型</b>{{ provider.config.allowed_models.join('、') || '无' }}</span>
               <span><b>并发上限</b>{{ provider.config.max_concurrency }}</span>
             </div>
@@ -407,11 +450,38 @@ watch(open, (value) => {
             <el-form-item label="Base URL">
               <el-input v-model="form.baseUrl" placeholder="https://gateway.example/v1" />
             </el-form-item>
-            <el-form-item label="Base URL 环境变量名">
-              <el-input v-model="form.baseUrlEnv" placeholder="TEAM_MODEL_BASE_URL" />
+            <el-form-item label="密钥配置方式">
+              <el-select v-model="form.credentialSource">
+                <el-option label="在页面中保存" value="stored" />
+                <el-option label="由环境变量注入" value="environment" />
+              </el-select>
             </el-form-item>
-            <el-form-item label="API Key 环境变量名">
-              <el-input v-model="form.apiKeyEnv" placeholder="TEAM_MODEL_API_KEY" />
+            <el-form-item
+              v-if="form.credentialSource === 'stored'"
+              :label="form.credentialConfigured ? 'API Key（留空则保持不变）' : 'API Key'"
+            >
+              <el-input
+                v-model="form.apiKey"
+                type="password"
+                show-password
+                autocomplete="new-password"
+                placeholder="输入模型服务密钥"
+                @input="form.clearApiKey = false"
+              />
+            </el-form-item>
+            <template v-else>
+              <el-form-item label="Base URL 环境变量名（可选）">
+                <el-input v-model="form.baseUrlEnv" placeholder="TEAM_MODEL_BASE_URL" />
+              </el-form-item>
+              <el-form-item label="API Key 环境变量名">
+                <el-input v-model="form.apiKeyEnv" placeholder="TEAM_MODEL_API_KEY" />
+              </el-form-item>
+            </template>
+            <el-form-item
+              v-if="form.credentialSource === 'stored' && form.credentialConfigured"
+              label="已保存的密钥"
+            >
+              <el-checkbox v-model="form.clearApiKey">删除原有密钥</el-checkbox>
             </el-form-item>
             <el-form-item label="超时（秒）">
               <el-input-number v-model="form.timeoutSeconds" :min="1" :max="600" />

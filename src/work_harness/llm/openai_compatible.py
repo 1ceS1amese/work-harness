@@ -37,12 +37,9 @@ class OpenAICompatibleProvider:
         self._config = config
         env_base_url = os.getenv(config.base_url_env or "", "").strip()
         self._base_url = (env_base_url or config.base_url or "").rstrip("/")
-        self._api_key = os.getenv(config.api_key_env or "", "")
-        if not self._base_url or not self._api_key:
-            raise ValueError(
-                f"provider {name} is enabled but required endpoint or credential is missing"
-            )
-        self._validate_base_url(self._base_url)
+        self._api_key = config.runtime_api_key()
+        if self._base_url:
+            self._validate_base_url(self._base_url)
         self._owns_client = client is None
         self._client = client or httpx.AsyncClient(
             timeout=config.timeout_seconds,
@@ -93,6 +90,10 @@ class OpenAICompatibleProvider:
         return bool(self._base_url and self._api_key)
 
     async def complete(self, request: ModelRequest, *, model: str) -> ModelResponse:
+        if not self._base_url or not self._api_key:
+            raise AuthenticationModelError(
+                f"provider {self.name} is waiting for endpoint or credential configuration"
+            )
         if model not in self._config.allowed_models:
             raise InvalidModelRequestError(f"model is not allowlisted: {model}")
         if self._config.api_family == "responses":

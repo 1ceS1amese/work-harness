@@ -11,9 +11,9 @@ from pathlib import Path
 from typing import Annotated, Any, Literal
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response, status
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
 
 from work_harness import __version__
 from work_harness.api.middleware import RequestGuardMiddleware
@@ -83,6 +83,24 @@ class ProviderSaved(ApiModel):
     restart_required: bool
 
 
+class ProviderSaveRequest(ProviderProfileSpec):
+    api_key: SecretStr | None = Field(default=None, min_length=1, max_length=65_536)
+    clear_api_key: bool = False
+
+    @model_validator(mode="after")
+    def validate_credential_update(self) -> ProviderSaveRequest:
+        if self.api_key is not None and self.clear_api_key:
+            raise ValueError("cannot set and clear a Provider credential together")
+        return self
+
+    def profile_spec(self) -> ProviderProfileSpec:
+        return ProviderProfileSpec(
+            config=self.config,
+            model_bindings=self.model_bindings,
+            agent_bindings=self.agent_bindings,
+        )
+
+
 class AppState:
     runtime: HarnessRuntime
     runs: RunManager
@@ -142,11 +160,13 @@ def create_app(project_root: Path | str | None = None) -> FastAPI:
     async def liveness() -> dict[str, str]:
         return {"status": "ok"}
 
-    @app.get("/health")
-    async def health() -> dict[str, Any]:
+    async def health_payload() -> dict[str, Any]:
+        providers = await state_holder.runtime.model_gateway.health()
+        ready = state_holder.runtime.provider_compatibility.compatible and bool(providers)
+        ready = ready and all(providers.values())
         return {
-            "status": "ok",
-            "providers": await state_holder.runtime.model_gateway.health(),
+            "status": "ok" if ready else "degraded",
+            "providers": providers,
             "checkpoint": state_holder.runtime.config.runtime.checkpoint.backend,
             "run_store": state_holder.runtime.run_store.backend,
             "provider_store": state_holder.runtime.provider_store.backend,
@@ -154,14 +174,33 @@ def create_app(project_root: Path | str | None = None) -> FastAPI:
             "scheduler": state_holder.runs.stats(),
         }
 
-    def provider_readiness(config: ProviderConfig) -> tuple[bool | None, bool | None]:
+    @app.get("/health")
+    async def health() -> dict[str, Any]:
+        return await health_payload()
+
+    @app.get("/health/ready", response_model=None)
+    async def readiness() -> JSONResponse:
+        payload = await health_payload()
+        return JSONResponse(
+            payload,
+            status_code=200 if payload["status"] == "ok" else 503,
+        )
+
+    def provider_readiness(
+        config: ProviderConfig,
+        profile: ProviderProfileRecord | None,
+    ) -> tuple[bool | None, bool | None]:
         if config.adapter != "openai_compatible":
             return None, None
         endpoint = bool(
             (config.base_url_env and os.getenv(config.base_url_env, "").strip())
             or config.base_url
         )
-        credential = bool(config.api_key_env and os.getenv(config.api_key_env, ""))
+        credential = (
+            bool(profile and profile.credential_configured)
+            if config.credential_source == "stored"
+            else bool(config.api_key_env and os.getenv(config.api_key_env, ""))
+        )
         return endpoint, credential
 
     async def provider_state() -> tuple[ProviderList, AppConfig]:
@@ -202,14 +241,18 @@ def create_app(project_root: Path | str | None = None) -> FastAPI:
             )
             is_loaded = (
                 name in loaded.models.providers
-                and selected == loaded.models.providers[name]
+                and selected.model_dump(mode="python")
+                == loaded.models.providers[name].model_dump(mode="python")
                 and effective_bindings == provider_model_bindings(loaded, name)
                 and (
                     not selected.enabled
                     or active_agent_bindings == provider_agent_bindings(loaded, name)
                 )
             )
-            endpoint, credential = provider_readiness(selected)
+            endpoint, credential = provider_readiness(
+                selected,
+                profiles_by_name.get(name),
+            )
             items.append(
                 ProviderDescriptor(
                     name=name,
@@ -333,10 +376,27 @@ def create_app(project_root: Path | str | None = None) -> FastAPI:
     @app.put("/v1/providers/{provider_name}", response_model=ProviderSaved)
     async def save_provider(
         provider_name: str,
-        profile: ProviderProfileSpec,
+        request: ProviderSaveRequest,
     ) -> ProviderSaved:
         existing = await state_holder.runtime.provider_store.list()
         prospective = [item for item in existing if item.name != provider_name]
+        previous = next((item for item in existing if item.name == provider_name), None)
+        api_key = request.api_key.get_secret_value() if request.api_key else None
+        clear_api_key = request.clear_api_key or request.config.credential_source != "stored"
+        credential_configured = bool(api_key) or bool(
+            previous and previous.credential_configured and not clear_api_key
+        )
+        if (
+            request.config.adapter == "openai_compatible"
+            and request.config.enabled
+            and request.config.credential_source == "stored"
+            and not credential_configured
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="enabled stored credential Provider requires an API Key",
+            )
+        profile = request.profile_spec()
         try:
             prospective.append(
                 ProviderProfileRecord(
@@ -348,7 +408,12 @@ def create_app(project_root: Path | str | None = None) -> FastAPI:
             )
             base = load_app_config(state_holder.runtime.config.project_root)
             apply_provider_profiles(base, prospective)
-            await state_holder.runtime.provider_store.upsert(provider_name, profile)
+            await state_holder.runtime.provider_store.upsert(
+                provider_name,
+                profile,
+                api_key=api_key,
+                clear_api_key=clear_api_key,
+            )
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         result, _ = await provider_state()

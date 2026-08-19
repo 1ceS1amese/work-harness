@@ -83,6 +83,34 @@ async def test_provider_sends_schema_and_parses_usage(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_provider_uses_runtime_stored_credential() -> None:
+    config = provider_config(
+        base_url="https://models.example.test/v1",
+        base_url_env=None,
+        credential_source="stored",
+        api_key_env=None,
+    )
+    config.set_runtime_api_key("stored-secret-for-test")
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        assert request.headers["authorization"] == "Bearer stored-secret-for-test"
+        return httpx.Response(
+            200,
+            json={
+                "choices": [{"message": {"content": '{"ok":true}'}}],
+                "usage": {"prompt_tokens": 1, "completion_tokens": 1},
+            },
+        )
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    provider = OpenAICompatibleProvider("stored", config, client=client)
+    response = await provider.complete(model_request(), model="test-model")
+
+    assert response.structured_output == {"ok": True}
+    await client.aclose()
+
+
+@pytest.mark.asyncio
 async def test_deepseek_chat_uses_json_object_and_max_tokens(monkeypatch) -> None:
     monkeypatch.setenv("TEST_MODEL_BASE_URL", "https://api.deepseek.test/v1")
     monkeypatch.setenv("TEST_MODEL_API_KEY", "secret-for-test")

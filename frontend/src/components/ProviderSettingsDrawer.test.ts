@@ -35,6 +35,7 @@ beforeEach(() => {
           enabled: true,
           base_url: 'https://models.example.test/v1',
           base_url_env: null,
+          credential_source: 'environment',
           api_key_env: 'TEAM_MODEL_API_KEY',
           allowed_models: ['main-model', 'worker-model'],
           capabilities: ['chat', 'structured_output', 'tool_calling'],

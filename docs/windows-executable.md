@@ -30,24 +30,28 @@ Work Harness 从 `v0.2.0` 起提供 Windows x64 单文件 `work-harness.exe`。�
 ├── data\checkpoints.sqlite
 ├── data\runs.sqlite
 ├── data\providers.sqlite
+├── data\providers.sqlite.key
 ├── reports\latest-evaluation.json
 ├── exports\schemas\
 └── logs\
 ```
 
-替换或移动 EXE 不会删除这些数据。Provider Profile 只保存 Base URL、环境变量名称、模型白名单
-和路由，不保存 API Key 值。删除上述目录会永久删除本机运行历史和 Provider 配置，请先停止程序并
-自行备份。
+替换或移动 EXE 不会删除这些数据。Provider 可使用环境变量 Key，也可在页面中保存认证加密后的
+Key；查询接口不会回显。使用页面凭据时，`providers.sqlite` 与 `providers.sqlite.key` 必须一起
+备份和恢复。删除上述目录会永久删除本机运行历史和 Provider 配置，请先停止程序并自行备份。
 
 可在启动前通过 `WORK_HARNESS_DATA_ROOT` 改变整个数据根目录，也可使用
 `WORK_HARNESS_CHECKPOINT_PATH`、`WORK_HARNESS_RUN_STORE_PATH` 和
 `WORK_HARNESS_PROVIDER_STORE_PATH` 分别覆盖数据库位置。
 
-## 自定义模型环境变量
+## 自定义模型凭据
 
 无需在安装阶段配置密钥。先在 Web 界面保存 OpenAI 协议或 DeepSeek 方言的 Provider Profile，
-并填写 Base URL 与 API Key 的“环境变量名称”。然后关闭程序，在同一 PowerShell 会话中设置对应
-变量并重新启动，例如：
+然后选择以下任一方式：
+
+- “在页面加密保存”：直接输入 API Key，保存并重启 EXE；
+- “从环境变量读取”：填写 Base URL 与 API Key 的变量名称，关闭程序后在同一 PowerShell
+  会话中设置对应变量并重新启动，例如：
 
 ```powershell
 $env:MY_MODEL_BASE_URL = "https://model.example.com/v1"
@@ -55,7 +59,7 @@ $env:MY_MODEL_API_KEY = Read-Host "API Key"
 .\work-harness.exe
 ```
 
-以上变量名只是示例；应与界面中保存的名称一致。不要把真实密钥提交到仓库或写入配置文件。
+以上变量名只是示例；应与界面中保存的名称一致。不要把真实密钥提交到仓库、YAML 或日志。
 
 ## EXE 的命令行模式
 

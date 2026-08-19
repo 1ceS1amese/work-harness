@@ -33,9 +33,13 @@ Chat 模式下 OpenAI 协议默认发送 `max_completion_tokens`，DeepSeek 方�
 
 ## Provider Profile 持久化
 
-`GET /v1/providers` 同时展示 YAML 默认值与 SQLite 覆盖，并只报告端点/凭据是否可用，不返回环境变量值。`PUT /v1/providers/{name}` 保存 Profile，`DELETE` 删除覆盖。模型映射示例：
+`GET /v1/providers` 同时展示 YAML 默认值与 SQLite 覆盖，并只报告端点/凭据是否可用，不返回
+环境变量值或页面保存的 Key。`PUT /v1/providers/{name}` 保存 Profile 以及可选的新 Key，
+`DELETE` 删除覆盖和对应密文。模型映射示例：
 
-前端群聊顶部的齿轮按钮会打开同一套 API 的可视化管理抽屉。界面只编辑 Provider 的非敏感 Profile，支持先以 `enabled: false` 暂存；保存后会显示待重启、端点就绪和密钥环境变量就绪状态。
+前端群聊顶部的齿轮按钮会打开同一套 API 的可视化管理抽屉。界面支持先以
+`enabled: false` 暂存，并在环境变量注入与页面加密保存之间选择；保存后会显示待重启、端点和
+凭据就绪状态。
 
 ```json
 {
@@ -45,6 +49,7 @@ Chat 模式下 OpenAI 协议默认发送 `max_completion_tokens`，DeepSeek 方�
     "api_family": "responses",
     "enabled": false,
     "base_url": "https://team-gateway.example/v1",
+    "credential_source": "environment",
     "api_key_env": "TEAM_GATEWAY_API_KEY",
     "allowed_models": ["main-model", "worker-a", "worker-b"],
     "capabilities": ["chat", "structured_output", "tool_calling"]
@@ -61,7 +66,18 @@ Chat 模式下 OpenAI 协议默认发送 `max_completion_tokens`，DeepSeek 方�
 }
 ```
 
-`main` 是主协调组别名，会展开为所有非 assignable 节点；每个 `worker-*` 子 Agent 可单独选择同一或不同 Provider Profile。多个启用 Profile 不能同时绑定同一个 Agent。写入前先按完整配置进行 fail-closed 校验；写入后重启装载，不在运行中关闭旧 HTTP Client。API Key 只能通过 `api_key_env` 指向的环境变量注入。
+`main` 是主协调组别名，会展开为所有非 assignable 节点；每个 `worker-*` 子 Agent 可单独选择
+同一或不同 Provider Profile。多个启用 Profile 不能同时绑定同一个 Agent。写入前先按完整配置
+进行 fail-closed 校验；写入后重启装载，不在运行中关闭旧 HTTP Client。
+
+凭据合同：
+
+- `credential_source: environment` 要求 `api_key_env`，实际 Key 只存在于进程环境；
+- `credential_source: stored` 禁止同时设置 `api_key_env`，Key 通过 PUT 请求的顶层
+  `api_key` 一次性提交，加密后保存；
+- PUT 不带 `api_key` 时保留旧密文，`clear_api_key: true` 显式清除；切回环境变量通道也会清除
+  不再使用的旧密文；
+- Profile 响应只包含 `credential_configured`，不回显 Key、密文或加密密钥。
 
 Provider Adapter 通过注册表按配置名称组装。内置 Adapter 是 `mock` 和 `openai_compatible`；外部包可声明入口点：
 

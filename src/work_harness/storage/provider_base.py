@@ -10,7 +10,7 @@ from work_harness.domain.models import utc_now
 
 
 class ProviderProfileSpec(BaseModel):
-    """Persistable provider settings. Credentials are referenced by env name only."""
+    """Persistable Provider settings; credential values use the store's secret channel."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -43,6 +43,7 @@ class ProviderProfileRecord(ProviderProfileSpec):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     name: str = Field(pattern=r"^[a-z][a-z0-9_-]{1,63}$")
+    credential_configured: bool = False
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
 
@@ -59,11 +60,18 @@ class ProviderProfileStore(Protocol):
     async def close(self) -> None: ...
 
     async def upsert(
-        self, name: str, profile: ProviderProfileSpec
+        self,
+        name: str,
+        profile: ProviderProfileSpec,
+        *,
+        api_key: str | None = None,
+        clear_api_key: bool = False,
     ) -> ProviderProfileRecord: ...
 
     async def get(self, name: str) -> ProviderProfileRecord | None: ...
 
     async def list(self) -> list[ProviderProfileRecord]: ...
+
+    async def get_api_key(self, name: str) -> str | None: ...
 
     async def delete(self, name: str) -> None: ...

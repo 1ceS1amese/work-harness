@@ -1,8 +1,9 @@
 # Docker Compose 一键部署
 
 本仓库提供完整的单实例部署方案：多阶段构建前端和 Python 运行环境、非 root
-应用进程、只读根文件系统、SQLite 持久化卷、健康检查、日志轮转、在线一致性备份，
-以及可选的 Caddy 自动 HTTPS 网关。
+应用进程、只读根文件系统、SQLite 持久化卷、存活/就绪检查、资源限制、日志轮转、在线一致性
+备份，以及带安全响应头的 Caddy 自动 HTTPS 网关。模型凭据既可由环境变量注入，也可在受
+认证的 Web 页面中加密保存。
 
 当前 Checkpoint、RunStore 和 ProviderStore 都使用 SQLite，因此部署合同是：
 
@@ -64,7 +65,7 @@ WORK_HARNESS_PORT=8000
 `linux/arm64` GHCR 镜像。复制页面上的完整版本化镜像引用，写入 `.env`：
 
 ```dotenv
-WORK_HARNESS_IMAGE=ghcr.io/<owner>/<repository>:0.2.1
+WORK_HARNESS_IMAGE=ghcr.io/<owner>/<repository>:0.2.2
 ```
 
 然后执行：
@@ -87,7 +88,19 @@ WORK_HARNESS_IMAGE=ghcr.io/<owner>/<repository>:0.2.1
 | `deploy/runtime.env` | API Key、模型端点、模型 Key、Provider 自定义变量 | 作为容器运行环境加载 |
 
 `deploy/runtime.env` 已被 Git 和 Docker 构建上下文排除。不要把密钥写入
-`compose.yaml`、`config/*.yaml`、Provider Profile 或 `VITE_*` 前端构建变量。
+`compose.yaml`、`config/*.yaml` 或 `VITE_*` 前端构建变量。
+
+Provider 凭据有两个互斥通道：
+
+| 通道 | 配置方式 | 适用场景 |
+| --- | --- | --- |
+| 环境变量 | Profile 保存变量名，Key 由 `deploy/runtime.env` 或外部 Secret Manager 注入 | 自动化部署、集中密钥轮换 |
+| 页面加密保存 | 已认证管理员在 Provider 设置页录入，服务端使用独立密钥加密后持久化 | 交互式单机部署、不方便控制进程环境的场景 |
+
+页面保存的 Key 不会被查询 API 回显，浏览器输入框留空即保留旧值。密文位于
+`providers.sqlite`，加密密钥位于同卷的 `providers.sqlite.key`，该文件在 ProviderStore 初始化时
+自动创建并限制为 `0600`。这种分离能降低单独泄露数据库文件的风险，但不能抵御整个数据卷、
+运行中容器或完整备份同时泄露；因此仍要限制宿主机、Docker 和备份目录的访问。
 
 若 Provider Profile 使用自定义变量名，直接追加到 `deploy/runtime.env`：
 
@@ -139,37 +152,49 @@ WORK_HARNESS_API_KEY=replace-manually
 
 ## 5. 接入自定义模型 Provider
 
-建议按以下顺序操作，避免因缺少环境变量导致容器启动失败：
+生产 Profile 可以在模型尚未配置时以“待配置”状态启动，`/health/live` 保持 200，
+`/health/ready` 返回 503，前端会阻止提交真实任务并直接打开 Provider 设置。按以下方式任选
+一个凭据通道：
 
-1. 以 `local` 或 `secure` 启动；
-2. 在 Provider 管理界面创建 Profile，先保持 `enabled: false`；
-3. 配置协议方言、`chat_completions`/`responses`、模型白名单、主 Agent 与子 Agent 路由；
-4. 将 Profile 引用的 Base URL 和 API Key 环境变量写入 `deploy/runtime.env`；
-5. 回到界面启用 Profile；
-6. 执行 `./scripts/compose.sh reload`；
-7. 检查 `/health` 和 `/v1/compatibility`，再执行真实任务验收。
+1. 在 Provider 管理界面创建或编辑 Profile；
+2. 配置 OpenAI 协议行为或 DeepSeek 方言、`chat_completions`/`responses`、Base URL、模型
+   白名单、逻辑模型映射，以及主 Agent/单独子 Agent 路由；
+3. 环境变量方式：选择“从环境变量读取”，保存变量名，把实际值写入
+   `deploy/runtime.env` 或 Secret Manager；
+4. 页面方式：选择“在页面加密保存”，输入 Key；保存后页面只显示凭据已经配置；
+5. 启用 Profile 并执行 `./scripts/compose.sh reload`，使新路由和凭据装载到运行时；
+6. 执行 `./scripts/compose.sh ready`，并查看 `/v1/compatibility` 后再做真实任务验收。
 
 访问宿主机上的模型服务时可使用 `host.docker.internal`。Linux Engine 下 Compose
 已经将它映射到 host gateway。HTTP 或私网端点还必须在对应 Provider Profile 中明确
 启用 `allow_insecure_http` 和 `allow_private_network`；这些开关不应在公网端点上启用。
 
-`production` 会禁用 Mock 并启用默认 `compatible` Provider。切换前必须确保持久化的
-`compatible` Profile 或生产 YAML 已使用真实模型 ID 和完整路由替换
-`configured-model`，且它引用的环境变量已经存在。
+`production` 会禁用 Mock 并启用默认 `compatible` Provider。投入真实任务前，必须确保持久化
+的 `compatible` Profile 或生产 YAML 已使用真实模型 ID 和完整路由替换
+`configured-model`，并且所选凭据通道已就绪。
 
 ## 6. 公网 HTTPS 一键部署
+
+首次生产安装推荐直接生成一组不会进入 Git 的模板：
+
+```bash
+./scripts/compose.sh init-production
+```
+
+该命令仅在 `.env` 和 `deploy/runtime.env` 都不存在时执行，避免覆盖已有配置。编辑真实域名和
+至少 32 字符的 `WORK_HARNESS_API_KEY`；模型变量可以全部留空，启动后再通过页面添加。
 
 先完成以下准备：
 
 1. 域名 A/AAAA 记录指向部署主机；
 2. 防火墙开放 TCP 80、TCP 443 和 UDP 443；
-3. 根目录 `.env` 使用真实域名，并选择 `secure` 或 `production`；
-4. `deploy/runtime.env` 已设置非空 `WORK_HARNESS_API_KEY`。
+3. 根目录 `.env` 使用真实域名并选择 `production`；
+4. `deploy/runtime.env` 已设置至少 32 字符的 `WORK_HARNESS_API_KEY`。
 
 示例 `.env`：
 
 ```dotenv
-WORK_HARNESS_PROFILE=secure
+WORK_HARNESS_PROFILE=production
 WORK_HARNESS_DOMAIN=harness.example.net
 WORK_HARNESS_BIND_ADDRESS=127.0.0.1
 ```
@@ -177,16 +202,17 @@ WORK_HARNESS_BIND_ADDRESS=127.0.0.1
 启动应用和 Caddy：
 
 ```bash
-./scripts/compose.sh public
+./scripts/compose.sh production
 ```
 
 如果 `.env` 已配置发布镜像，则使用：
 
 ```bash
-./scripts/compose.sh install-public
+./scripts/compose.sh install-production
 ```
 
-脚本会拒绝示例域名、`local` profile 或空 API Key。Caddy 自动申请和续期证书，
+脚本会拒绝示例域名、非 `production` profile、弱部署 Key，以及只设置 URL 或只设置 Key 的
+环境变量 Provider。Caddy 自动申请和续期证书，并附加 HSTS、CSP、禁止 MIME 嗅探等响应头；
 应用端口仍只绑定到宿主机回环地址，容器间通过 Compose 网络通信。
 
 ## 7. 日常运维
@@ -200,6 +226,9 @@ WORK_HARNESS_BIND_ADDRESS=127.0.0.1
 
 # 应用与 Compose 配置检查
 ./scripts/compose.sh check
+
+# 验证所有启用的真实 Provider 已经就绪
+./scripts/compose.sh ready
 
 # 拉取新版基础镜像并重新构建
 ./scripts/compose.sh update
@@ -227,16 +256,19 @@ backups/work-harness-YYYYMMDDTHHMMSSZ/
   checkpoints.sqlite
   runs.sqlite
   providers.sqlite
+  providers.sqlite.key
   manifest.json
 ```
 
-`manifest.json` 记录每个文件的大小和 SHA-256。恢复会覆盖当前数据，因此没有放入
+`manifest.json` 记录每个文件的大小和 SHA-256。备份目录会被收紧为仅当前用户可读。恢复会
+覆盖当前数据，因此没有放入
 一键脚本。恢复前应：
 
 1. 再执行一次当前状态备份；
 2. `./scripts/compose.sh down`，确保没有写入者；
 3. 校验目标备份的 `manifest.json`；
-4. 将三个 SQLite 文件恢复到 `work-harness-data` 卷根目录；
+4. 将三个 SQLite 文件恢复到 `work-harness-data` 卷根目录；若清单中包含
+   `providers.sqlite.key`，必须同时恢复且权限设为 `0600`，否则页面保存的凭据无法解密；
 5. 保持文件所有者为容器用户 UID/GID `10001:10001`；
 6. 重新启动并检查运行列表、Provider Profile 和 `/health`。
 
@@ -251,7 +283,7 @@ backups/work-harness-YYYYMMDDTHHMMSSZ/
 自行发布到其他 Registry 时，建议使用不可变版本标签：
 
 ```dotenv
-WORK_HARNESS_IMAGE=registry.example.com/team/work-harness:0.2.1
+WORK_HARNESS_IMAGE=registry.example.com/team/work-harness:0.2.2
 ```
 
 构建后推送：
@@ -276,9 +308,11 @@ curl http://127.0.0.1:8000/health/live
 
 常见原因：
 
-- `unhealthy`：查看启动日志，通常是配置、数据库权限或已启用 Provider 缺少环境变量；
+- `unhealthy`：查看启动日志，通常是配置错误或数据库权限问题；Provider 尚未配置只会影响
+  readiness，不会让容器存活检查失败；
 - `401`：浏览器中输入与 `deploy/runtime.env` 相同的部署 API Key；
-- Provider 启用后启动失败：先补齐它引用的环境变量，再 `reload`；
+- `ready` 返回 503：补齐所选环境变量，或在页面保存凭据并 `reload`；
+- 页面凭据无法解密：确认 `providers.sqlite.key` 与数据库来自同一份备份且容器用户可读；
 - 无法连接宿主机模型：使用 `host.docker.internal`，并确认服务监听地址和 Provider 私网策略；
 - WSL 报 Docker daemon 不可用：启动 Docker Desktop 并启用该发行版的 WSL Integration；
 - 端口 80/443 被占用：停止冲突的代理，或仅在内网模式使用自定义映射端口。

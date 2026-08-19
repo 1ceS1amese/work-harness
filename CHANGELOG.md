@@ -13,6 +13,22 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - A production-grade shared database and task queue for multi-instance deployments.
 - Server-side conversations, tenant isolation, and organization identity integration.
 
+## 0.2.2 - 2026-08-19
+
+### Added
+
+- Dual Provider credential channels: environment injection for automated deployments and
+  authenticated UI entry with Fernet-encrypted SQLite persistence for interactive installs.
+- Separate liveness and Provider readiness endpoints, production Compose initialization and
+  validation commands, resource limits, hardened Caddy headers, and credential-key-aware backups.
+
+### Changed
+
+- The workbench now uses a low-saturation gray/white square visual system and opens Provider
+  settings when a production installation is waiting for model configuration.
+- OpenAI-compatible Providers may start without a credential so administrators can complete the
+  first-run setup through the authenticated UI; model calls remain unavailable until readiness.
+
 ## 0.2.1 - 2026-08-19
 
 ### Added

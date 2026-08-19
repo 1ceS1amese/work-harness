@@ -12,6 +12,7 @@ from work_harness.storage.provider_base import (
     ProviderProfileSpec,
     ProviderProfileStoreNotFoundError,
 )
+from work_harness.storage.secrets import ProviderSecretCipher
 
 
 class SQLiteProviderProfileStore:
@@ -19,6 +20,8 @@ class SQLiteProviderProfileStore:
 
     def __init__(self, path: Path) -> None:
         self.path = path
+        self.key_path = path.with_name(f"{path.name}.key")
+        self._cipher = ProviderSecretCipher(self.key_path)
         self._write_lock = asyncio.Lock()
 
     def _connect(self) -> sqlite3.Connection:
@@ -29,6 +32,7 @@ class SQLiteProviderProfileStore:
 
     async def initialize(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        await asyncio.to_thread(self._cipher.initialize)
         await asyncio.to_thread(self._initialize_sync)
 
     def _initialize_sync(self) -> None:
@@ -41,6 +45,7 @@ class SQLiteProviderProfileStore:
                     config_json TEXT NOT NULL,
                     model_bindings_json TEXT NOT NULL,
                     agent_bindings_json TEXT NOT NULL DEFAULT '{}',
+                    credential_ciphertext BLOB,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 )
@@ -55,38 +60,69 @@ class SQLiteProviderProfileStore:
                     "ALTER TABLE provider_profiles "
                     "ADD COLUMN agent_bindings_json TEXT NOT NULL DEFAULT '{}'"
                 )
+            if "credential_ciphertext" not in columns:
+                connection.execute(
+                    "ALTER TABLE provider_profiles ADD COLUMN credential_ciphertext BLOB"
+                )
             connection.commit()
 
     async def close(self) -> None:
         return None
 
     async def upsert(
-        self, name: str, profile: ProviderProfileSpec
+        self,
+        name: str,
+        profile: ProviderProfileSpec,
+        *,
+        api_key: str | None = None,
+        clear_api_key: bool = False,
     ) -> ProviderProfileRecord:
         async with self._write_lock:
-            return await asyncio.to_thread(self._upsert_sync, name, profile)
+            return await asyncio.to_thread(
+                self._upsert_sync,
+                name,
+                profile,
+                api_key,
+                clear_api_key,
+            )
 
     def _upsert_sync(
-        self, name: str, profile: ProviderProfileSpec
+        self,
+        name: str,
+        profile: ProviderProfileSpec,
+        api_key: str | None,
+        clear_api_key: bool,
     ) -> ProviderProfileRecord:
+        if api_key is not None and clear_api_key:
+            raise ValueError("cannot set and clear a Provider credential together")
         # Validate the path identifier before it reaches SQL or durable state.
         pending = ProviderProfileRecord(name=name, **profile.model_dump(mode="python"))
         now = utc_now()
         with closing(self._connect()) as connection:
             existing = connection.execute(
-                "SELECT created_at FROM provider_profiles WHERE name = ?", (name,)
+                "SELECT created_at, credential_ciphertext FROM provider_profiles "
+                "WHERE name = ?",
+                (name,),
             ).fetchone()
             created_at = existing["created_at"] if existing else now.isoformat()
+            credential_ciphertext = (
+                existing["credential_ciphertext"] if existing else None
+            )
+            if clear_api_key:
+                credential_ciphertext = None
+            elif api_key is not None:
+                credential_ciphertext = self._cipher.encrypt(api_key)
             connection.execute(
                 """
                 INSERT INTO provider_profiles (
                     name, config_json, model_bindings_json, agent_bindings_json,
-                    created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?)
+                    credential_ciphertext, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(name) DO UPDATE SET
                     config_json = excluded.config_json,
                     model_bindings_json = excluded.model_bindings_json,
                     agent_bindings_json = excluded.agent_bindings_json,
+                    credential_ciphertext = excluded.credential_ciphertext,
                     updated_at = excluded.updated_at
                 """,
                 (
@@ -104,6 +140,7 @@ class SQLiteProviderProfileStore:
                         sort_keys=True,
                         separators=(",", ":"),
                     ),
+                    credential_ciphertext,
                     created_at,
                     now.isoformat(),
                 ),
@@ -136,6 +173,19 @@ class SQLiteProviderProfileStore:
             ).fetchall()
             return [self._record(row) for row in rows]
 
+    async def get_api_key(self, name: str) -> str | None:
+        return await asyncio.to_thread(self._get_api_key_sync, name)
+
+    def _get_api_key_sync(self, name: str) -> str | None:
+        with closing(self._connect()) as connection:
+            row = connection.execute(
+                "SELECT credential_ciphertext FROM provider_profiles WHERE name = ?",
+                (name,),
+            ).fetchone()
+            if row is None or row["credential_ciphertext"] is None:
+                return None
+            return self._cipher.decrypt(row["credential_ciphertext"])
+
     async def delete(self, name: str) -> None:
         async with self._write_lock:
             await asyncio.to_thread(self._delete_sync, name)
@@ -156,6 +206,7 @@ class SQLiteProviderProfileStore:
             config=json.loads(row["config_json"]),
             model_bindings=json.loads(row["model_bindings_json"]),
             agent_bindings=json.loads(row["agent_bindings_json"]),
+            credential_configured=row["credential_ciphertext"] is not None,
             created_at=row["created_at"],
             updated_at=row["updated_at"],
         )

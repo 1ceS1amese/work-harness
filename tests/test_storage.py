@@ -99,6 +99,40 @@ async def test_sqlite_provider_profiles_survive_reopen_without_secrets(
 
 
 @pytest.mark.asyncio
+async def test_sqlite_provider_store_encrypts_ui_managed_credentials(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "providers.sqlite"
+    api_key = "ui-managed-secret-value"
+    profile = ProviderProfileSpec(
+        config=ProviderConfig(
+            adapter="openai_compatible",
+            enabled=True,
+            base_url="https://models.example.test/v1",
+            credential_source="stored",
+            allowed_models=["test-model"],
+            capabilities={"chat", "structured_output", "tool_calling"},
+        ),
+        model_bindings={"worker-fast": "test-model"},
+    )
+    store = SQLiteProviderProfileStore(path)
+    await store.initialize()
+    saved = await store.upsert("ui-provider", profile, api_key=api_key)
+    await store.close()
+
+    assert saved.credential_configured is True
+    assert api_key.encode() not in path.read_bytes()
+    assert (tmp_path / "providers.sqlite.key").is_file()
+
+    reopened = SQLiteProviderProfileStore(path)
+    await reopened.initialize()
+    assert await reopened.get_api_key("ui-provider") == api_key
+    await reopened.upsert("ui-provider", profile, clear_api_key=True)
+    assert await reopened.get_api_key("ui-provider") is None
+    await reopened.close()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("backend", ["memory", "sqlite"])
 async def test_run_lease_prevents_duplicate_owner(tmp_path: Path, backend: str) -> None:
     store = MemoryRunStore() if backend == "memory" else SQLiteRunStore(tmp_path / "lease.sqlite")

@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any, Literal
 from urllib.parse import parse_qsl, urlparse
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
 
 from work_harness.domain.enums import RiskLevel, ToolCategory
 
@@ -78,6 +79,8 @@ class RuntimeConfig(ConfigModel):
 
 
 class ProviderConfig(ConfigModel):
+    _runtime_api_key: str | None = PrivateAttr(default=None)
+
     adapter: str = Field(pattern=r"^[a-z][a-z0-9_]{1,63}$")
     protocol_variant: Literal["openai", "deepseek"] = "openai"
     api_family: Literal["chat_completions", "responses"] = "chat_completions"
@@ -87,6 +90,7 @@ class ProviderConfig(ConfigModel):
     enabled: bool = True
     base_url: str | None = None
     base_url_env: str | None = Field(default=None, pattern=r"^[A-Za-z_][A-Za-z0-9_]*$")
+    credential_source: Literal["environment", "stored"] = "environment"
     api_key_env: str | None = Field(default=None, pattern=r"^[A-Za-z_][A-Za-z0-9_]*$")
     allowed_models: list[str] = Field(default_factory=list)
     capabilities: set[str] = Field(default_factory=set)
@@ -125,7 +129,7 @@ class ProviderConfig(ConfigModel):
                         sensitive_suffixes
                     ):
                         raise ValueError(
-                            "provider options cannot contain credentials; use api_key_env"
+                            "provider options cannot contain credentials; use a credential channel"
                         )
                     inspect(nested)
             elif isinstance(item, list):
@@ -137,17 +141,31 @@ class ProviderConfig(ConfigModel):
 
     @model_validator(mode="after")
     def validate_provider_contract(self) -> ProviderConfig:
+        if (
+            self.adapter == "openai_compatible"
+            and self.credential_source == "stored"
+            and self.api_key_env
+        ):
+            raise ValueError("stored credentials cannot also configure api_key_env")
         if self.adapter == "openai_compatible" and self.enabled:
-            if (
-                not (self.base_url or self.base_url_env)
-                or not self.api_key_env
-                or not self.allowed_models
-            ):
+            if not (self.base_url or self.base_url_env) or not self.allowed_models:
                 raise ValueError(
                     "enabled openai_compatible provider requires base_url or "
-                    "base_url_env, api_key_env, and allowed_models"
+                    "base_url_env and allowed_models"
                 )
+            if self.credential_source == "environment" and not self.api_key_env:
+                raise ValueError("environment credentials require api_key_env")
         return self
+
+    def set_runtime_api_key(self, value: str | None) -> None:
+        """Attach a decrypted credential for this process without serializing it."""
+
+        self._runtime_api_key = value
+
+    def runtime_api_key(self) -> str:
+        if self.credential_source == "stored":
+            return self._runtime_api_key or ""
+        return os.getenv(self.api_key_env or "", "")
 
 
 class ProviderCompatibilityConfig(ConfigModel):

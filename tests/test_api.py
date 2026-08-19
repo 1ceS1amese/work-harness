@@ -34,6 +34,10 @@ async def test_api_creates_and_queries_run(tmp_path: Path, monkeypatch) -> None:
             assert liveness.status_code == 200
             assert liveness.json() == {"status": "ok"}
 
+            readiness = await client.get("/health/ready")
+            assert readiness.status_code == 200
+            assert readiness.json()["status"] == "ok"
+
             capabilities = await client.get("/v1/capabilities")
             assert capabilities.status_code == 200
             assignable_agents = {
@@ -117,6 +121,46 @@ async def test_api_creates_and_queries_run(tmp_path: Path, monkeypatch) -> None:
             assert first.status_code == 202
             assert duplicate.json()["run_id"] == first.json()["run_id"]
             assert conflict.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_production_starts_in_configuration_mode_without_provider_key(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("WORK_HARNESS_PROFILE", "production")
+    monkeypatch.setenv("WORK_HARNESS_API_KEY", "deployment-key-for-readiness-test")
+    monkeypatch.delenv("MODEL_BASE_URL", raising=False)
+    monkeypatch.delenv("MODEL_API_KEY", raising=False)
+    monkeypatch.setenv(
+        "WORK_HARNESS_CHECKPOINT_PATH", str(tmp_path / "production-checkpoint.sqlite")
+    )
+    monkeypatch.setenv(
+        "WORK_HARNESS_RUN_STORE_PATH", str(tmp_path / "production-runs.sqlite")
+    )
+    monkeypatch.setenv(
+        "WORK_HARNESS_PROVIDER_STORE_PATH", str(tmp_path / "production-providers.sqlite")
+    )
+
+    app = create_app(PROJECT_ROOT)
+    async with app.router.lifespan_context(app):
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app),
+            base_url="http://test",
+            headers={"X-API-Key": "deployment-key-for-readiness-test"},
+        ) as client:
+            readiness = await client.get("/health/ready")
+            assert readiness.status_code == 503
+            assert readiness.json()["status"] == "degraded"
+            assert readiness.json()["providers"] == {"compatible": False}
+
+            providers = await client.get("/v1/providers")
+            assert providers.status_code == 200
+            compatible = next(
+                item for item in providers.json()["items"]
+                if item["name"] == "compatible"
+            )
+            assert compatible["credential_available"] is False
 
 
 @pytest.mark.asyncio
@@ -254,6 +298,62 @@ async def test_api_stages_disabled_provider_without_credential_value(
 
     assert b"MANUAL_MODEL_API_KEY" in provider_store.read_bytes()
     assert b"sk-" not in provider_store.read_bytes()
+
+
+@pytest.mark.asyncio
+async def test_api_persists_encrypted_ui_managed_provider_key(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv(
+        "WORK_HARNESS_CHECKPOINT_PATH", str(tmp_path / "ui-checkpoint.sqlite")
+    )
+    monkeypatch.setenv("WORK_HARNESS_RUN_STORE_PATH", str(tmp_path / "ui-runs.sqlite"))
+    provider_store = tmp_path / "ui-providers.sqlite"
+    monkeypatch.setenv("WORK_HARNESS_PROVIDER_STORE_PATH", str(provider_store))
+    api_key = "ui-managed-provider-secret"
+    payload = {
+        "config": {
+            "adapter": "openai_compatible",
+            "protocol_variant": "openai",
+            "api_family": "chat_completions",
+            "enabled": True,
+            "base_url": "https://models.example.test/v1",
+            "credential_source": "stored",
+            "allowed_models": ["ui-model"],
+            "capabilities": ["chat", "structured_output", "tool_calling"],
+        },
+        "model_bindings": {"worker-fast": "ui-model"},
+        "api_key": api_key,
+    }
+
+    first_app = create_app(PROJECT_ROOT)
+    async with first_app.router.lifespan_context(first_app):
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=first_app),
+            base_url="http://test",
+        ) as client:
+            saved = await client.put("/v1/providers/ui-provider", json=payload)
+            assert saved.status_code == 200
+            assert saved.json()["provider"]["credential_available"] is True
+            assert api_key not in saved.text
+
+    assert api_key.encode() not in provider_store.read_bytes()
+    assert (tmp_path / "ui-providers.sqlite.key").is_file()
+
+    second_app = create_app(PROJECT_ROOT)
+    async with second_app.router.lifespan_context(second_app):
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=second_app),
+            base_url="http://test",
+        ) as client:
+            providers = (await client.get("/v1/providers")).json()
+            stored = next(
+                item for item in providers["items"] if item["name"] == "ui-provider"
+            )
+            assert stored["loaded"] is True
+            assert stored["credential_available"] is True
+            assert stored["config"]["credential_source"] == "stored"
 
 
 @pytest.mark.asyncio

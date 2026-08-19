@@ -18,8 +18,8 @@ Provider 层面向用户自定义的 OpenAI 协议端点，而不是绑定单一
 DeepSeek 方言均可通过 Chat Completions 或 Responses 接入；主 Agent 与每个子 Agent 也可
 分别选择 Provider 和模型路由。
 
-当前版本是 Alpha，适合本地开发、协议测试、单实例部署和手动真实模型验证；暂不适合作为
-多租户或横向扩容的生产服务。
+当前版本支持经过加固的单实例生产部署和手动真实模型验证。由于使用 SQLite 和部署级共享
+API Key，它有意不提供多租户身份体系与横向扩容能力。
 
 ## 目录
 
@@ -38,9 +38,10 @@ DeepSeek 方言均可通过 Chat Completions 或 Responses 接入；主 Agent �
 
 ## 安全
 
-不要把模型密钥写入 YAML、Provider Profile、前端构建变量、日志或 SQLite。Provider Profile
-只保存环境变量名。服务暴露到受信任主机之外前，请使用 `secure` 或 `production` 配置并启用
-HTTPS。
+不要把模型密钥写入 YAML、前端构建变量或日志。Provider 可以读取指定环境变量，也可以通过
+已认证的设置页面录入密钥。页面录入的密钥会使用独立的 `providers.sqlite.key` 加密后再写入
+SQLite，查询接口绝不回显。服务暴露到受信任主机之外前，请使用 `secure` 或 `production` 配置
+并启用 HTTPS，同时保护数据卷和备份。
 
 内置 API Key 是部署级共享密钥，不代表用户身份或租户隔离。SQLite 仅支持单应用进程。
 完整边界和私密漏洞报告方式见 [SECURITY.md](SECURITY.md)。
@@ -115,7 +116,7 @@ uv run work-harness serve
 通过容器镜像和源码分发。
 
 ```bash
-python -m pip install work_harness-0.2.1-py3-none-any.whl
+python -m pip install work_harness-0.2.2-py3-none-any.whl
 work-harness check-config
 work-harness serve --host 127.0.0.1 --port 8000
 ```
@@ -152,15 +153,17 @@ uv run work-harness eval
 
 ### 自定义 Provider
 
-Web 界面可以保存不含密钥值的 Provider 配置：
+Web 界面支持两种 Provider 凭据通道：
 
 1. 选择 `openai` 或 `deepseek` 协议行为；
 2. 选择 `chat_completions` 或 `responses`；
 3. 设置允许使用的真实模型 ID；
 4. 映射逻辑模型、主协调组和单独的 `worker-*` Agent；
-5. 填写 Base URL 与 API Key 的环境变量名；
-6. 将对应变量注入运行环境；
-7. 启用 Profile 并重启服务。
+5. 选择环境变量注入并填写 API Key 变量名，或选择页面加密保存并仅录入一次密钥；
+6. 启用 Profile 并重启服务。
+
+自动化部署和 Secret Manager 更适合环境变量通道；交互式安装可使用页面保存。浏览器只在保存
+时发送密钥，留空表示保留旧值，查询接口只返回 `credential_configured` 是否就绪。
 
 `main` 绑定会展开到 normalizer、planner、reviewer、judge 和 synthesizer。单独子 Agent 的绑定
 会覆盖逻辑模型默认路由；任务级 Skill Provider 固定具有最高优先级。
@@ -228,33 +231,39 @@ Provider 声明、适配器行为、逻辑路由或 Skill 要求不一致时，�
 ./scripts/compose.sh down
 ```
 
-公网 HTTPS 部署需创建 `.env` 和 `deploy/runtime.env`，选择 `secure` 或 `production`，设置真实
-域名与部署 API Key，然后运行：
+使用当前源码进行 HTTPS 生产部署时，先生成私有配置模板，替换部署 Key 和域名，再启动：
 
 ```bash
-./scripts/compose.sh public
+./scripts/compose.sh init-production
+# 编辑 .env 和 deploy/runtime.env
+./scripts/compose.sh production
+./scripts/compose.sh ready
 ```
 
 `WORK_HARNESS_IMAGE` 指向已发布 GHCR 镜像时，改用
-`./scripts/compose.sh install-public`。
+`./scripts/compose.sh install-production`。`deploy/runtime.env` 中的模型变量可以留空：服务会先以
+待配置状态启动，管理员可在设置页加密保存 Provider 密钥，再执行
+`./scripts/compose.sh reload`。
 
-`public` 会拒绝本地 Profile、示例域名或空部署密钥。对外开放主机前请完整阅读
+生产命令会拒绝本地 Profile、示例域名、弱部署 Key 或只配置一半的环境变量 Provider。对外开放
+主机前请完整阅读
 [Docker Compose 部署指南](docs/docker-deployment.md)。除非确定要删除持久状态，否则不要执行
 `docker compose down -v`。
 
 ## 项目状态
 
-版本 `0.2.1` 当前包括：
+当前源码包括：
 
-- 66 个后端测试与 14 个前端测试；
+- 71 个后端测试与 15 个前端测试；
 - 风险自适应复核：高风险任务保留三维检查，确定性低风险流程由 11 次模型调用降至 7 次；
 - 事件驱动 SSE、受限的运行/Provider 并发和运行级幂等 Tool 缓存；
 - 10/10 的确定性 Mock 工作流评测；
-- 可持久化的 Provider Profile 与按 Agent 划分的模型路由；
+- 可持久化的 Provider Profile、页面加密凭据、环境变量凭据与按 Agent 划分的模型路由；
 - 基于租约和心跳的单实例重启恢复；
 - 一个只读工作区 Tool 与两个可执行示例 Skill；
 - 一个将持久化数据置于包外的 Windows x64 单文件 EXE；
-- Compose 部署、可选 Caddy HTTPS、存活检查与一致性 SQLite 备份。
+- 带生产配置校验的 Compose 部署、Caddy HTTPS 与安全响应头、存活/就绪检查分离、资源限制，
+  以及包含凭据密钥文件的一致性备份。
 
 仓库不会包含真实 Provider 密钥。多实例存储、可靠任务队列、服务端会话、组织身份和业务 Tool
 仍属于后续工作。参见[开发状态](docs/development-status.md)与 [CHANGELOG.md](CHANGELOG.md)。
@@ -265,6 +274,7 @@ Provider 声明、适配器行为、逻辑路由或 Skill 要求不一致时，�
 | --- | --- | --- |
 | `GET` | `/health/live` | 无需认证的进程存活检查 |
 | `GET` | `/health` | Provider 与存储就绪状态 |
+| `GET` | `/health/ready` | 部署就绪检查；启用的 Provider 不可用时返回 503 |
 | `GET` | `/v1/capabilities` | Agent、函数、模型、Tool 与 Skill |
 | `GET` | `/v1/compatibility` | Provider、适配器、Tool 与 Skill 报告 |
 | `GET` | `/v1/providers` | 生效和持久化的 Provider Profile |

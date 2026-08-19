@@ -148,6 +148,29 @@ describe('harness api client', () => {
     )
   })
 
+  it('sends a UI-managed Provider credential only in the save request', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({ provider: { name: 'ui-model' }, restart_required: true }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await harnessApi.saveProvider('ui-model', {
+      config: {
+        adapter: 'openai_compatible',
+        credential_source: 'stored',
+        allowed_models: ['main-model'],
+      },
+      api_key: 'ui-secret-value',
+    })
+
+    const body = JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string)
+    expect(body.api_key).toBe('ui-secret-value')
+    expect(body.config.api_key_env).toBeUndefined()
+  })
+
   it('streams run snapshots and closes the event source', () => {
     let instance: FakeEventSource | undefined
     class FakeEventSource {

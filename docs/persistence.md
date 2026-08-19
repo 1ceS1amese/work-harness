@@ -7,7 +7,7 @@
 1. LangGraph 执行状态可以在进程重启后恢复；
 2. run_id、状态和幂等关系可以被可靠查询；
 3. 前端群聊在刷新页面后可以继续展示。
-4. Provider 的非敏感配置和模型映射可以在进程重启后恢复。
+4. Provider 配置、模型映射及可选的页面托管凭据可以在进程重启后恢复。
 
 这些状态不能写进同一张业务表，也不能由 `RunManager` 直接操作具体数据库。
 
@@ -17,25 +17,39 @@
 |---|---|---|---|
 | Workflow Checkpoint | LangGraph Checkpointer | Graph State、任务、计划、产物、复核、中断点 | `var/checkpoints.sqlite` |
 | Run Index | `RunStore` | run_id、状态、时间、幂等哈希、请求指纹 | `var/runs.sqlite` |
-| Provider Profile | `ProviderProfileStore` | Adapter、协议变体、端点、密钥环境变量名、模型映射、逐 Agent 路由 | `var/providers.sqlite` |
+| Provider Profile | `ProviderProfileStore` | Adapter、协议变体、端点、凭据通道、模型映射、逐 Agent 路由及可选的凭据密文 | `var/providers.sqlite` + `var/providers.sqlite.key` |
 | UI Conversation | `ConversationStorage` | 群聊、消息、选择项、活动会话 | 浏览器 localStorage |
 
 RunStore 不保存原始幂等键和完整请求，只保存 SHA-256 哈希。这样既支持幂等校验，也减少运行列表数据库中的敏感数据复制。
 
-ProviderProfileStore 不接收或保存 API Key 值，只保存 `api_key_env`。`options` 中的 `authorization`、`api_key`、`token`、`secret`、`password` 等字段会被 Schema 拒绝。
+ProviderProfileStore 支持 `environment` 和 `stored` 两个互斥凭据通道。前者只保存
+`api_key_env`；后者把 API Key 使用 Fernet 认证加密后写入 `credential_ciphertext`，主密钥保存在
+数据库旁的 `.key` 文件。API 列表只返回 `credential_configured` 布尔值，运行时解密值放在
+Pydantic private attribute 中，不参与序列化、日志或配置比较。`options` 中的
+`authorization`、`api_key`、`token`、`secret`、`password` 等旁路字段仍会被 Schema 拒绝。
 
 ## ProviderProfileStore 合同
 
 ```text
 initialize()                         初始化表或连接
-upsert(name, profile)                原子新增或替换一个 Profile
+upsert(name, profile, api_key?, clear_api_key?)
+                                      原子保存 Profile，并按需保留、替换或清除密文
 get(name)                            查询单个持久化 Profile
+get_api_key(name)                    仅供运行时解密读取页面托管凭据
 list()                               按名称稳定排序
 delete(name)                         删除覆盖；不存在时明确报错
 close()                              释放资源
 ```
 
-启动时先加载 YAML，再按名称叠加 SQLite Profile，并重建逻辑模型候选与 Agent 路由。`agent_bindings.main` 展开到所有非 assignable 的主协调角色，具体 `worker-*` 绑定只影响对应子 Agent。叠加后的完整 `AppConfig` 必须再次通过模型白名单、能力全等、逻辑模型候选、Agent 引用和 Skill 兼容校验，否则启动失败。管理 API 的写入不会热切换正在使用的 Provider；`PUT`/`DELETE` 返回后需重启，防止进行中的模型调用被关闭或改路由。
+启动时先加载 YAML，再按名称叠加 SQLite Profile，并重建逻辑模型候选与 Agent 路由；随后只为
+选择 `stored` 通道的 Provider 解密运行时 Key。`agent_bindings.main` 展开到所有非 assignable 的
+主协调角色，具体 `worker-*` 绑定只影响对应子 Agent。叠加后的完整 `AppConfig` 必须再次通过
+模型白名单、能力全等、逻辑模型候选、Agent 引用和 Skill 兼容校验，否则启动失败。管理 API 的
+写入不会热切换正在使用的 Provider；`PUT`/`DELETE` 返回后需重启，防止进行中的模型调用被关闭
+或改路由。
+
+`.key` 文件与 SQLite 密文必须作为一组备份和恢复。分离密钥只防止数据库文件单独泄露时直接
+暴露明文，不抵御数据卷、运行中进程或完整备份被同时读取。
 
 ## RunStore 合同
 

@@ -208,6 +208,7 @@ export interface ProviderCompatibilityItem {
 
 export type ProviderProtocolVariant = 'openai' | 'deepseek'
 export type ProviderApiFamily = 'chat_completions' | 'responses'
+export type ProviderCredentialSource = 'environment' | 'stored'
 
 export interface ProviderConfig {
   adapter: string
@@ -219,6 +220,7 @@ export interface ProviderConfig {
   enabled: boolean
   base_url: string | null
   base_url_env: string | null
+  credential_source: ProviderCredentialSource
   api_key_env: string | null
   allowed_models: string[]
   capabilities: string[]
@@ -233,6 +235,8 @@ export interface ProviderProfileSpec {
   config: Pick<ProviderConfig, 'adapter'> & Partial<Omit<ProviderConfig, 'adapter'>>
   model_bindings?: Record<string, string>
   agent_bindings?: Record<string, string>
+  api_key?: string
+  clear_api_key?: boolean
 }
 
 export interface ProviderDescriptor {

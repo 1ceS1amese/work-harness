@@ -56,7 +56,7 @@ dev = [
   "ruff>=0.12,<1",
 ]
 packaging = [
-  "pyinstaller==6.21.0",
+  "pyinstaller==6.22.1",
 ]
 
 [project.scripts]

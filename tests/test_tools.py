@@ -12,11 +12,11 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 @pytest.fixture
-def gateway() -> ToolGateway:
+def gateway(tool_workspace: Path) -> ToolGateway:
     config = load_app_config(PROJECT_ROOT)
     registry = ToolRegistry(config.tools)
     registry.register(EchoReadTool())
-    registry.register(WorkspaceReadTool(PROJECT_ROOT))
+    registry.register(WorkspaceReadTool(tool_workspace))
     registry.validate_complete()
     return ToolGateway(registry)
 
@@ -51,7 +51,10 @@ async def test_workspace_tool_reads_searches_and_blocks_escape(gateway: ToolGate
         tool_name="workspace_read",
         arguments={"operation": "read", "path": "README.md", "max_lines": 3},
     )
-    assert "Work Harness" in str(read.output["content"])
+    assert read.output["content"] == (
+        "1: # Workspace tool fixture\n2: Sample project documentation.\n3: Third line."
+    )
+    assert read.output["truncated"] is True
 
     search = await gateway.execute(
         run_id="run_test",
@@ -60,10 +63,12 @@ async def test_workspace_tool_reads_searches_and_blocks_escape(gateway: ToolGate
         arguments={
             "operation": "search",
             "path": "src",
-            "query": "class RunManager",
+            "query": "class SampleService",
         },
     )
-    assert any(item["path"].endswith("service.py") for item in search.output["matches"])
+    assert search.output["matches"] == [
+        {"path": "src/example.py", "line": 1, "text": "class SampleService:"}
+    ]
 
     with pytest.raises(ToolPermissionError):
         await gateway.execute(

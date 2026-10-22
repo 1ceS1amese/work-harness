@@ -25,6 +25,8 @@ from work_harness.service import (
     RunManager,
 )
 from work_harness.storage import RunRecord
+from work_harness.tools.adapters import ToolAdapterRegistry
+from work_harness.tools.builtin import EchoReadTool, WorkspaceReadTool
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
@@ -195,8 +197,12 @@ async def test_skill_routes_workers_to_selected_provider() -> None:
 @pytest.mark.asyncio
 async def test_worker_executes_advertised_tool_calls(
     monkeypatch: pytest.MonkeyPatch,
+    tool_workspace: Path,
 ) -> None:
     original_complete = MockProvider.complete
+    tool_adapters = ToolAdapterRegistry()
+    tool_adapters.register("echo_read", lambda _: EchoReadTool())
+    tool_adapters.register("workspace_read", lambda _: WorkspaceReadTool(tool_workspace))
 
     async def complete_with_tool(self, request, *, model):
         operation = request.metadata.get("operation")
@@ -209,6 +215,10 @@ async def test_worker_executes_advertised_tool_calls(
             ]
             return response.model_copy(update={"structured_output": structured})
         has_tool_result = any(message.role == "tool" for message in request.messages)
+        if operation == "worker" and has_tool_result:
+            tool_results = [message for message in request.messages if message.role == "tool"]
+            assert all("Workspace tool fixture" in message.content for message in tool_results)
+            assert all("Third line." not in message.content for message in tool_results)
         if operation == "worker" and request.tools and not has_tool_result:
             subtask_id = request.metadata["payload"]["subtask"]["subtask_id"]
             return ModelResponse(
@@ -229,7 +239,9 @@ async def test_worker_executes_advertised_tool_calls(
         return await original_complete(self, request, model=model)
 
     monkeypatch.setattr(MockProvider, "complete", complete_with_tool)
-    async with build_runtime(PROJECT_ROOT, checkpoint_backend="memory") as runtime:
+    async with build_runtime(
+        PROJECT_ROOT, checkpoint_backend="memory", tool_adapters=tool_adapters
+    ) as runtime:
         manager = RunManager(runtime)
         run_id = await manager.start(TaskRequest(goal="Inspect the repository documentation"))
         result = await manager.wait(run_id)
@@ -237,7 +249,8 @@ async def test_worker_executes_advertised_tool_calls(
     assert result.status == RunStatus.SUCCEEDED
     assert len(result.tool_calls) == 2
     assert {item.tool_name for item in result.tool_calls} == {"workspace_read"}
-    assert all("Work Harness" in item.output_summary for item in result.tool_calls)
+    assert all("Workspace tool fixture" in item.output_summary for item in result.tool_calls)
+    assert all("Third line." not in item.output_summary for item in result.tool_calls)
 
 
 @pytest.mark.asyncio

@@ -29,6 +29,19 @@ def legacy_engine(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture
+def tool_workspace(tmp_path: Path) -> Path:
+    """Stable input files for tool tests, independent of repository documentation."""
+    root = tmp_path / "workspace"
+    (root / "src").mkdir(parents=True)
+    (root / "README.md").write_text(
+        "# Workspace tool fixture\nSample project documentation.\nThird line.\nFourth line.\n",
+        encoding="utf-8",
+    )
+    (root / "src" / "example.py").write_text("class SampleService:\n    pass\n", encoding="utf-8")
+    return root
+
+
+@pytest.fixture
 async def postgres_blackboard_factory():
     """Each test owns a schema; additional clients share it without touching other data."""
     stores = []

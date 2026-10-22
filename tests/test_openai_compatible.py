@@ -111,6 +111,56 @@ async def test_provider_uses_runtime_stored_credential() -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("api_family", "expected_path"),
+    [
+        ("chat_completions", "/gateway/v1/chat/completions"),
+        ("responses", "/gateway/v1/responses"),
+    ],
+)
+async def test_provider_preserves_base_url_query_while_appending_api_path(
+    monkeypatch,
+    api_family: str,
+    expected_path: str,
+) -> None:
+    monkeypatch.setenv("TEST_MODEL_API_KEY", "secret-for-test")
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == expected_path
+        assert request.url.params.get("api-version") == "2026-01-01"
+        if api_family == "responses":
+            return httpx.Response(
+                200,
+                json={
+                    "status": "completed",
+                    "output": [
+                        {
+                            "type": "message",
+                            "content": [{"type": "output_text", "text": '{"ok":true}'}],
+                        }
+                    ],
+                },
+            )
+        return httpx.Response(
+            200,
+            json={"choices": [{"message": {"content": '{"ok":true}'}}]},
+        )
+
+    config = provider_config(
+        api_family=api_family,
+        base_url="https://models.example.test/gateway/v1?api-version=2026-01-01",
+        base_url_env=None,
+    )
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    provider = OpenAICompatibleProvider("query-provider", config, client=client)
+
+    response = await provider.complete(model_request(), model="test-model")
+
+    assert response.structured_output == {"ok": True}
+    await client.aclose()
+
+
+@pytest.mark.asyncio
 async def test_deepseek_chat_uses_json_object_and_max_tokens(monkeypatch) -> None:
     monkeypatch.setenv("TEST_MODEL_BASE_URL", "https://api.deepseek.test/v1")
     monkeypatch.setenv("TEST_MODEL_API_KEY", "secret-for-test")

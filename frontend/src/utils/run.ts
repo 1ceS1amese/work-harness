@@ -3,7 +3,7 @@ import type { RunResult, RunStatus } from '../types'
 export interface RunStage {
   label: string
   description: string
-  progress: number
+  progress: number | null
 }
 
 export const ACTIVE_RUN_STATUSES: RunStatus[] = ['pending', 'running']
@@ -25,6 +25,19 @@ export const STATUS_LABELS: Record<RunStatus, string> = {
 }
 
 export function getRunStage(run: RunResult): RunStage {
+  if (run.engine === 'blackboard') {
+    const descriptions: Record<RunStatus, [string, string]> = {
+      pending: ['等待启动', '黑板运行正在排队。'],
+      running: ['围绕目标探索', '知识源根据已提交的信息继续探索；可在黑板中查看验收缺口与证据。'],
+      waiting_human: ['等待补充', '需要人工补充信息。查看目标缺口与受阻的探索方向。'],
+      succeeded: ['验收已满足', '目标验收条件已满足，可查看对应事实及核验范围。'],
+      partial: ['保留部分成果', '运行已停止，仍有验收条件未满足。'],
+      failed: ['运行已停止', '未能满足目标，请查看停止原因与尚缺信息。'],
+      cancelled: ['运行已取消', '黑板已停止推进，可查看已提交的记录。'],
+    }
+    const [label, description] = descriptions[run.status]
+    return { label, description, progress: null }
+  }
   if (run.status === 'succeeded') {
     return { label: '都搞定了', description: '大家已经把结果整理好了。', progress: 100 }
   }
@@ -85,6 +98,7 @@ export function resultMessage(run: RunResult): string {
     return run.output || '运行已结束，但没有返回文本结果。'
   }
   if (run.status === 'waiting_human') {
+    if (run.engine === 'blackboard') return run.output || getRunStage(run).description
     return run.decision?.human_prompt || '任务已暂停，需要你确认是否继续。'
   }
   if (run.status === 'cancelled') return '任务已取消。'

@@ -175,14 +175,16 @@
       "title": "Timeout Seconds",
       "type": "number"
     },
-    "token_budget": {
+    "max_output_tokens": {
       "default": 4000,
+      "description": "Maximum output tokens per model call.",
       "minimum": 1,
-      "title": "Token Budget",
+      "title": "Max Output Tokens",
       "type": "integer"
     },
     "cost_budget_usd": {
-      "default": 1.0,
+      "default": 0,
+      "deprecated": true,
       "minimum": 0,
       "title": "Cost Budget Usd",
       "type": "number"

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import sqlite3
 from contextlib import closing
 from datetime import timedelta
@@ -9,7 +10,7 @@ from typing import Any
 
 from work_harness.domain.enums import RunStatus
 from work_harness.domain.models import utc_now
-from work_harness.storage.base import RunRecord, RunStoreNotFoundError
+from work_harness.storage.base import RunExecutionVersion, RunRecord, RunStoreNotFoundError
 
 
 class SQLiteRunStore:
@@ -39,6 +40,7 @@ class SQLiteRunStore:
                     status TEXT NOT NULL,
                     idempotency_key_hash TEXT,
                     request_fingerprint TEXT,
+                    execution TEXT,
                     lease_owner TEXT,
                     lease_expires_at TEXT,
                     attempt_count INTEGER NOT NULL DEFAULT 0,
@@ -47,10 +49,9 @@ class SQLiteRunStore:
                 )
                 """
             )
-            columns = {
-                row["name"] for row in connection.execute("PRAGMA table_info(run_index)")
-            }
+            columns = {row["name"] for row in connection.execute("PRAGMA table_info(run_index)")}
             migrations = {
+                "execution": "ALTER TABLE run_index ADD COLUMN execution TEXT",
                 "lease_owner": "ALTER TABLE run_index ADD COLUMN lease_owner TEXT",
                 "lease_expires_at": "ALTER TABLE run_index ADD COLUMN lease_expires_at TEXT",
                 "attempt_count": (
@@ -71,23 +72,33 @@ class SQLiteRunStore:
                 "CREATE INDEX IF NOT EXISTS ix_run_index_recovery "
                 "ON run_index(status, lease_expires_at)"
             )
+            connection.execute(
+                "CREATE TABLE IF NOT EXISTS run_inputs ("
+                "run_id TEXT PRIMARY KEY REFERENCES run_index(run_id), payload TEXT NOT NULL)"
+            )
             connection.commit()
 
     async def close(self) -> None:
         return None
 
-    async def reserve(self, record: RunRecord) -> RunRecord:
+    async def reserve(
+        self, record: RunRecord, *, initial_input: dict[str, Any] | None = None
+    ) -> RunRecord:
+        payload = (
+            json.dumps(initial_input, ensure_ascii=False) if initial_input is not None else None
+        )
         async with self._write_lock:
-            return await asyncio.to_thread(self._reserve_sync, record)
+            return await asyncio.to_thread(self._reserve_sync, record, payload)
 
-    def _reserve_sync(self, record: RunRecord) -> RunRecord:
+    def _reserve_sync(self, record: RunRecord, initial_input: str | None) -> RunRecord:
         with closing(self._connect()) as connection:
-            connection.execute(
+            cursor = connection.execute(
                 """
                 INSERT OR IGNORE INTO run_index (
                     run_id, status, idempotency_key_hash, request_fingerprint,
-                    lease_owner, lease_expires_at, attempt_count, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    lease_owner, lease_expires_at, attempt_count, created_at, updated_at,
+                    execution
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     record.run_id,
@@ -99,8 +110,14 @@ class SQLiteRunStore:
                     record.attempt_count,
                     record.created_at.isoformat(),
                     record.updated_at.isoformat(),
+                    record.execution.model_dump_json() if record.execution else None,
                 ),
             )
+            if cursor.rowcount and initial_input is not None:
+                connection.execute(
+                    "INSERT INTO run_inputs (run_id, payload) VALUES (?, ?)",
+                    (record.run_id, initial_input),
+                )
             connection.commit()
             if record.idempotency_key_hash:
                 row = connection.execute(
@@ -115,6 +132,16 @@ class SQLiteRunStore:
                 raise RuntimeError("run reservation was not persisted")
             return self._record(row)
 
+    async def get_initial_input(self, run_id: str) -> dict[str, Any] | None:
+        def read() -> dict[str, Any] | None:
+            with closing(self._connect()) as connection:
+                row = connection.execute(
+                    "SELECT payload FROM run_inputs WHERE run_id = ?", (run_id,)
+                ).fetchone()
+                return json.loads(row["payload"]) if row else None
+
+        return await asyncio.to_thread(read)
+
     async def get(self, run_id: str) -> RunRecord | None:
         return await asyncio.to_thread(self._get_sync, run_id)
 
@@ -122,6 +149,20 @@ class SQLiteRunStore:
         with closing(self._connect()) as connection:
             row = connection.execute(
                 "SELECT * FROM run_index WHERE run_id = ?", (run_id,)
+            ).fetchone()
+            return self._record(row) if row else None
+
+    async def get_by_idempotency_key_hash(self, idempotency_key_hash: str) -> RunRecord | None:
+        return await asyncio.to_thread(
+            self._get_by_idempotency_key_hash_sync,
+            idempotency_key_hash,
+        )
+
+    def _get_by_idempotency_key_hash_sync(self, idempotency_key_hash: str) -> RunRecord | None:
+        with closing(self._connect()) as connection:
+            row = connection.execute(
+                "SELECT * FROM run_index WHERE idempotency_key_hash = ?",
+                (idempotency_key_hash,),
             ).fetchone()
             return self._record(row) if row else None
 
@@ -174,17 +215,11 @@ class SQLiteRunStore:
             ).fetchall()
             return [self._record(row) for row in rows]
 
-    async def claim(
-        self, run_id: str, *, owner: str, lease_seconds: float
-    ) -> RunRecord | None:
+    async def claim(self, run_id: str, *, owner: str, lease_seconds: float) -> RunRecord | None:
         async with self._write_lock:
-            return await asyncio.to_thread(
-                self._claim_sync, run_id, owner, lease_seconds
-            )
+            return await asyncio.to_thread(self._claim_sync, run_id, owner, lease_seconds)
 
-    def _claim_sync(
-        self, run_id: str, owner: str, lease_seconds: float
-    ) -> RunRecord | None:
+    def _claim_sync(self, run_id: str, owner: str, lease_seconds: float) -> RunRecord | None:
         now = utc_now()
         expires = now + timedelta(seconds=lease_seconds)
         with closing(self._connect()) as connection:
@@ -219,13 +254,9 @@ class SQLiteRunStore:
             ).fetchone()
             return self._record(row) if row else None
 
-    async def heartbeat(
-        self, run_id: str, *, owner: str, lease_seconds: float
-    ) -> bool:
+    async def heartbeat(self, run_id: str, *, owner: str, lease_seconds: float) -> bool:
         async with self._write_lock:
-            return await asyncio.to_thread(
-                self._heartbeat_sync, run_id, owner, lease_seconds
-            )
+            return await asyncio.to_thread(self._heartbeat_sync, run_id, owner, lease_seconds)
 
     def _heartbeat_sync(self, run_id: str, owner: str, lease_seconds: float) -> bool:
         now = utc_now()
@@ -285,4 +316,7 @@ class SQLiteRunStore:
 
     @staticmethod
     def _record(row: sqlite3.Row | dict[str, Any]) -> RunRecord:
-        return RunRecord.model_validate(dict(row))
+        payload = dict(row)
+        if payload.get("execution") is not None:
+            payload["execution"] = RunExecutionVersion.model_validate_json(payload["execution"])
+        return RunRecord.model_validate(payload)

@@ -2,7 +2,7 @@ import pytest
 from pydantic import ValidationError
 
 from work_harness.domain.enums import AllocationMode
-from work_harness.domain.models import AgentAssignment, Plan, SubtaskSpec
+from work_harness.domain.models import AgentAssignment, Artifact, Plan, SubtaskSpec
 
 
 def test_plan_rejects_dependency_cycle() -> None:
@@ -82,3 +82,23 @@ def test_legacy_specialist_ids_migrate_to_homogeneous_agents() -> None:
         "worker-03": ["execution"],
         "worker-04": ["risk"],
     }
+
+
+def test_artifact_contract_supports_the_configurable_runtime_ceiling() -> None:
+    artifact = Artifact(
+        run_id="run_large_artifact",
+        subtask_id="large-output",
+        producer="worker-01",
+        content="x" * 200_000,
+        confidence=0.8,
+    )
+
+    assert len(artifact.content) == 200_000
+    with pytest.raises(ValidationError):
+        Artifact(
+            run_id="run_too_large",
+            subtask_id="too-large-output",
+            producer="worker-01",
+            content="x" * 200_001,
+            confidence=0.8,
+        )

@@ -11,11 +11,16 @@ export {}
 /* prettier-ignore */
 declare module 'vue' {
   export interface GlobalComponents {
+    BlackboardKnowledgeGraph: typeof import('./components/BlackboardKnowledgeGraph.vue')['default']
+    BlackboardNodeDetails: typeof import('./components/BlackboardNodeDetails.vue')['default']
+    BlackboardObjectCard: typeof import('./components/BlackboardObjectCard.vue')['default']
+    BlackboardRunDetails: typeof import('./components/BlackboardRunDetails.vue')['default']
     ChatSidebar: typeof import('./components/ChatSidebar.vue')['default']
     ComposerBox: typeof import('./components/ComposerBox.vue')['default']
     ElAlert: typeof import('element-plus/es')['ElAlert']
     ElButton: typeof import('element-plus/es')['ElButton']
     ElCheckbox: typeof import('element-plus/es')['ElCheckbox']
+    ElCheckboxGroup: typeof import('element-plus/es')['ElCheckboxGroup']
     ElCollapse: typeof import('element-plus/es')['ElCollapse']
     ElCollapseItem: typeof import('element-plus/es')['ElCollapseItem']
     ElDialog: typeof import('element-plus/es')['ElDialog']
@@ -39,7 +44,12 @@ declare module 'vue' {
     ElTimelineItem: typeof import('element-plus/es')['ElTimelineItem']
     GroupChatLayout: typeof import('./components/GroupChatLayout.vue')['default']
     MessageBubble: typeof import('./components/MessageBubble.vue')['default']
-    ProviderSettingsDrawer: typeof import('./components/ProviderSettingsDrawer.vue')['default']
+    PromptSettingsPanel: typeof import('./components/PromptSettingsPanel.vue')['default']
+    ProviderSettingsPanel: typeof import('./components/ProviderSettingsPanel.vue')['default']
     RunDetailsDrawer: typeof import('./components/RunDetailsDrawer.vue')['default']
+    RunHistoryDrawer: typeof import('./components/RunHistoryDrawer.vue')['default']
+    RunModeOptions: typeof import('./components/RunModeOptions.vue')['default']
+    RuntimeSettingsPanel: typeof import('./components/RuntimeSettingsPanel.vue')['default']
+    SettingsPage: typeof import('./components/SettingsPage.vue')['default']
   }
 }

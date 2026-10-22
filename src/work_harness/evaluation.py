@@ -14,6 +14,39 @@ from work_harness.runtime import HarnessRuntime
 from work_harness.service import RunManager
 
 
+def prepare_comparison() -> dict[str, object]:
+    """An unexecuted handoff template; never inspect credentials or construct a provider."""
+    return {
+        "version": "blackboard-comparison-001",
+        "evaluation_scope": "real_provider_engine_comparison",
+        "status": "awaiting_provider",
+        "quality_claim": False,
+        "eligible_for_default_switch": False,
+        "provider": {
+            "name": None,
+            "model": None,
+            "base_url_env": "MODEL_BASE_URL",
+            "api_key_env": "MODEL_API_KEY",
+            "model_env": "MODEL_ID",
+        },
+        "case_set": None,
+        "acceptance_thresholds": None,
+        "shared_budget": None,
+        "results": {
+            engine: {
+                "status": "not_run",
+                "quality_pass_rate": None,
+                "input_tokens": None,
+                "output_tokens": None,
+                "estimated_cost_usd": None,
+                "latency_ms": None,
+                "ineffective_activations": None,
+            }
+            for engine in ("legacy", "blackboard")
+        },
+    }
+
+
 class EvalCase(BaseModel):
     model_config = ConfigDict(extra="forbid")
     id: str
@@ -53,7 +86,7 @@ async def run_evaluation(runtime: HarnessRuntime, cases_path: Path) -> dict[str,
         started = time.perf_counter()
         risk = RiskLevel.HIGH if "approval" in case.tags else RiskLevel.LOW
         run_id = await manager.start(
-            TaskRequest(goal=case.input, task_type=case.task_type, risk_level=risk)
+            TaskRequest(goal=case.input, engine="legacy", task_type=case.task_type, risk_level=risk)
         )
         result = await manager.wait(run_id)
         latency_ms = int((time.perf_counter() - started) * 1000)
@@ -129,9 +162,7 @@ async def run_evaluation(runtime: HarnessRuntime, cases_path: Path) -> dict[str,
     }
 
 
-def save_report(report: dict[str, object], output_path: Path) -> None:
+def save_report(report: dict[str, object], output_path: Path, *, overwrite: bool = True) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(
-        json.dumps(report, ensure_ascii=False, indent=2, default=str) + "\n",
-        encoding="utf-8",
-    )
+    with output_path.open("w" if overwrite else "x", encoding="utf-8") as stream:
+        stream.write(json.dumps(report, ensure_ascii=False, indent=2, default=str) + "\n")

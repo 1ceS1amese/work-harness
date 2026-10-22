@@ -26,6 +26,18 @@ const LEGACY_AGENT_IDS: Record<string, string> = {
   'worker-delivery': 'worker-03',
   'worker-risk': 'worker-04',
 }
+const RUN_STATUSES = new Set<RunStatus>([
+  'pending',
+  'running',
+  'waiting_human',
+  'succeeded',
+  'partial',
+  'failed',
+  'cancelled',
+])
+const RISK_LEVELS = new Set<RiskLevel>(['low', 'medium', 'high', 'critical'])
+const ALLOCATION_MODES = new Set<AllocationMode>(['auto', 'direct', 'cross_functional'])
+const AGENT_FUNCTIONS = new Set<AgentFunction>(['analysis', 'research', 'execution', 'risk'])
 
 function makeId(prefix: string): string {
   const suffix = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`
@@ -54,36 +66,104 @@ function freshConversation(): Conversation {
   }
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function normalizeMessages(value: unknown): ChatMessage[] {
+  if (!Array.isArray(value)) return []
+  return value.flatMap((raw): ChatMessage[] => {
+    if (
+      !isRecord(raw)
+      || typeof raw.id !== 'string'
+      || (raw.role !== 'user' && raw.role !== 'assistant')
+      || typeof raw.content !== 'string'
+    ) return []
+    return [{
+      id: raw.id,
+      role: raw.role,
+      content: raw.content,
+      createdAt: typeof raw.createdAt === 'string' ? raw.createdAt : now(),
+      ...(typeof raw.runId === 'string' ? { runId: raw.runId } : {}),
+      ...(typeof raw.status === 'string' && RUN_STATUSES.has(raw.status as RunStatus)
+        ? { status: raw.status as RunStatus }
+        : {}),
+    }]
+  })
+}
+
+function normalizeSkillSelections(value: unknown): SkillSelection[] {
+  if (!Array.isArray(value)) return []
+  return value.flatMap((raw): SkillSelection[] => {
+    if (!isRecord(raw) || typeof raw.skill_id !== 'string') return []
+    return [{
+      skill_id: raw.skill_id,
+      provider: typeof raw.provider === 'string' ? raw.provider : null,
+    }]
+  })
+}
+
+function normalizeFunctions(
+  value: unknown,
+  selectedAgentIds: string[],
+): Partial<Record<string, AgentFunction[]>> {
+  const normalized: Partial<Record<string, AgentFunction[]>> = {}
+  if (isRecord(value)) {
+    for (const [rawAgentId, rawFunctions] of Object.entries(value)) {
+      if (!Array.isArray(rawFunctions)) continue
+      const agentId = LEGACY_AGENT_IDS[rawAgentId] ?? rawAgentId
+      const functions = [...new Set(
+        rawFunctions.filter(
+          (item): item is AgentFunction =>
+            typeof item === 'string' && AGENT_FUNCTIONS.has(item as AgentFunction),
+        ),
+      )]
+      if (functions.length > 0) normalized[agentId] = functions
+    }
+  }
+  for (const agentId of selectedAgentIds) {
+    normalized[agentId] ??= [...(DEFAULT_FUNCTIONS[agentId] ?? ['execution'])]
+  }
+  return normalized
+}
+
+export function normalizeConversationHistory(value: unknown): Conversation[] {
+  if (!Array.isArray(value)) return []
+  return value.flatMap((raw): Conversation[] => {
+    if (!isRecord(raw) || typeof raw.id !== 'string' || !Array.isArray(raw.messages)) return []
+    const selectedAgentIds = [...new Set(
+      (Array.isArray(raw.selectedAgentIds) ? raw.selectedAgentIds : DEFAULT_AGENT_IDS)
+        .filter((agentId): agentId is string => typeof agentId === 'string')
+        .map((agentId) => LEGACY_AGENT_IDS[agentId] ?? agentId),
+    )]
+    const createdAt = typeof raw.createdAt === 'string' ? raw.createdAt : now()
+    return [{
+      id: raw.id,
+      title: typeof raw.title === 'string' && raw.title ? raw.title : '新对话',
+      taskType: typeof raw.taskType === 'string' && raw.taskType ? raw.taskType : 'general',
+      riskLevel:
+        typeof raw.riskLevel === 'string' && RISK_LEVELS.has(raw.riskLevel as RiskLevel)
+          ? raw.riskLevel as RiskLevel
+          : 'low',
+      allocationMode:
+        typeof raw.allocationMode === 'string'
+          && ALLOCATION_MODES.has(raw.allocationMode as AllocationMode)
+          ? raw.allocationMode as AllocationMode
+          : 'cross_functional',
+      selectedAgentIds,
+      functionsByAgent: normalizeFunctions(raw.functionsByAgent, selectedAgentIds),
+      crossReview: typeof raw.crossReview === 'boolean' ? raw.crossReview : true,
+      skillSelections: normalizeSkillSelections(raw.skillSelections),
+      messages: normalizeMessages(raw.messages),
+      createdAt,
+      updatedAt: typeof raw.updatedAt === 'string' ? raw.updatedAt : createdAt,
+    }]
+  }).slice(0, MAX_CONVERSATIONS)
+}
+
 function loadConversations(): Conversation[] {
   try {
-    const parsed = conversationStorage.loadConversations()
-    if (!Array.isArray(parsed)) return []
-    return parsed
-      .filter(
-        (item): item is Conversation =>
-          typeof item === 'object' && item !== null && 'id' in item && 'messages' in item,
-      )
-      .map((item) => ({
-        ...item,
-        allocationMode: item.allocationMode ?? 'cross_functional',
-        selectedAgentIds: [
-          ...new Set(
-            (item.selectedAgentIds ?? DEFAULT_AGENT_IDS).map(
-              (agentId) => LEGACY_AGENT_IDS[agentId] ?? agentId,
-            ),
-          ),
-        ],
-        functionsByAgent:
-          item.functionsByAgent ??
-          Object.fromEntries(
-            (item.selectedAgentIds ?? DEFAULT_AGENT_IDS).map((agentId) => {
-              const migratedId = LEGACY_AGENT_IDS[agentId] ?? agentId
-              return [migratedId, DEFAULT_FUNCTIONS[migratedId] ?? ['execution']]
-            }),
-          ),
-        crossReview: item.crossReview ?? true,
-        skillSelections: item.skillSelections ?? [],
-      }))
+    return normalizeConversationHistory(conversationStorage.loadConversations())
   } catch {
     return []
   }

@@ -10,6 +10,7 @@ defineProps<{
   connectionLabel: string
   connectionState: 'checking' | 'online' | 'setup' | 'offline' | 'auth'
   members: AgentDescriptor[]
+  blackboardMode?: boolean
 }>()
 </script>
 
@@ -74,7 +75,8 @@ defineProps<{
     <aside class="group-info-panel">
       <section class="group-info-section group-notice">
         <h2>群公告</h2>
-        <p>把事情直接发到群里就行。任务管家会安排分工，大家做完后再互相检查一遍。</p>
+        <p v-if="blackboardMode">先选择完成条件，再提交目标。成员读取共享黑板并补充信息，系统根据板面继续探索。</p>
+        <p v-else>把事情直接发到群里就行。任务管家会安排分工，大家做完后再互相检查一遍。</p>
       </section>
       <section class="group-info-section">
         <div class="group-info-heading">

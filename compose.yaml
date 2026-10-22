@@ -17,11 +17,12 @@ services:
       - path: ./deploy/runtime.env
         required: false
     environment:
-      WORK_HARNESS_PROFILE: ${WORK_HARNESS_PROFILE:-local}
+      WORK_HARNESS_PROFILE: ${WORK_HARNESS_PROFILE:-setup}
       WORK_HARNESS_LOG_LEVEL: ${WORK_HARNESS_LOG_LEVEL:-INFO}
       WORK_HARNESS_CHECKPOINT_PATH: /app/var/checkpoints.sqlite
       WORK_HARNESS_RUN_STORE_PATH: /app/var/runs.sqlite
       WORK_HARNESS_PROVIDER_STORE_PATH: /app/var/providers.sqlite
+      WORK_HARNESS_SETTINGS_PATH: /app/var/settings.json
     ports:
       - "${WORK_HARNESS_BIND_ADDRESS:-127.0.0.1}:${WORK_HARNESS_PORT:-8000}:8000"
     extra_hosts:

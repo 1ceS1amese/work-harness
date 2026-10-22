@@ -6,7 +6,7 @@ import os
 import re
 import time
 from typing import Any
-from urllib.parse import parse_qsl, urlparse
+from urllib.parse import parse_qsl, urlparse, urlunparse
 
 import httpx
 
@@ -97,10 +97,10 @@ class OpenAICompatibleProvider:
         if model not in self._config.allowed_models:
             raise InvalidModelRequestError(f"model is not allowlisted: {model}")
         if self._config.api_family == "responses":
-            endpoint = f"{self._base_url}/responses"
+            endpoint = self._endpoint("responses")
             payload = self._responses_payload(request, model)
         else:
-            endpoint = f"{self._base_url}/chat/completions"
+            endpoint = self._endpoint("chat/completions")
             payload = self._chat_payload(request, model)
 
         started = time.perf_counter()
@@ -119,6 +119,13 @@ class OpenAICompatibleProvider:
             return self._parse_responses(data, response, request, model, latency_ms)
         return self._parse_chat(data, response, request, model, latency_ms)
 
+    def _endpoint(self, suffix: str) -> str:
+        """Append an API path without accidentally appending it to a query string."""
+
+        parsed = urlparse(self._base_url)
+        path = f"{parsed.path.rstrip('/')}/{suffix}"
+        return urlunparse(parsed._replace(path=path, fragment=""))
+
     def _chat_payload(self, request: ModelRequest, model: str) -> dict[str, object]:
         messages = [self._chat_message(message) for message in request.messages]
         payload: dict[str, object] = {"model": model, "messages": messages}
@@ -129,7 +136,7 @@ class OpenAICompatibleProvider:
                 if self._config.protocol_variant == "deepseek"
                 else "max_completion_tokens"
             )
-        payload[token_parameter] = request.token_budget
+        payload[token_parameter] = request.max_output_tokens
         if request.tools:
             payload["tools"] = request.tools
         if request.response_schema:
@@ -170,7 +177,7 @@ class OpenAICompatibleProvider:
         payload: dict[str, object] = {
             "model": model,
             "input": self._responses_input(request.messages),
-            "max_output_tokens": request.token_budget,
+            "max_output_tokens": request.max_output_tokens,
             "store": self._config.store_responses,
         }
         if request.tools:
@@ -298,9 +305,7 @@ class OpenAICompatibleProvider:
             ),
             finish_reason=choice.get("finish_reason") or "stop",
             usage=Usage(
-                input_tokens=usage.get("prompt_tokens", 0),
-                output_tokens=usage.get("completion_tokens", 0),
-                cached_tokens=prompt_details.get("cached_tokens", 0),
+                **self._usage_fields(usage, "prompt_tokens", "completion_tokens", prompt_details),
             ),
             latency_ms=latency_ms,
             provider=self.name,
@@ -378,15 +383,30 @@ class OpenAICompatibleProvider:
             response_items=output,
             finish_reason=finish_reason,
             usage=Usage(
-                input_tokens=usage.get("input_tokens", 0),
-                output_tokens=usage.get("output_tokens", 0),
-                cached_tokens=input_details.get("cached_tokens", 0),
+                **self._usage_fields(usage, "input_tokens", "output_tokens", input_details),
             ),
             latency_ms=latency_ms,
             provider=self.name,
             model=model,
             provider_request_id=self._request_id(response, data),
         )
+
+    @staticmethod
+    def _usage_fields(usage, input_key, output_key, details) -> dict[str, Any]:
+        # Missing, null or malformed provider counts are unknown, never evidence of zero use.
+        def valid(value):
+            return type(value) is int and value >= 0
+
+        input_count, output_count = usage.get(input_key), usage.get(output_key)
+        cached = details.get("cached_tokens", 0)
+        complete = valid(input_count) and valid(output_count)
+        cache_valid = valid(cached) and valid(input_count) and cached <= input_count
+        return {
+            "input_tokens": input_count if valid(input_count) else 0,
+            "output_tokens": output_count if valid(output_count) else 0,
+            "cached_tokens": cached if cache_valid else 0,
+            "usage_complete": complete and cache_valid,
+        }
 
     @staticmethod
     def _structured_output(

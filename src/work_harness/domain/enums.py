@@ -31,6 +31,19 @@ class RunStatus(StrEnum):
     CANCELLED = "cancelled"
 
 
+class RunJobKind(StrEnum):
+    START = "start"
+    RESUME = "resume"
+
+
+class RunJobStatus(StrEnum):
+    AVAILABLE = "available"
+    LEASED = "leased"
+    COMPLETED = "completed"
+    CANCELLED = "cancelled"
+    DEAD = "dead"
+
+
 class ArtifactStatus(StrEnum):
     SUCCESS = "success"
     PARTIAL = "partial"

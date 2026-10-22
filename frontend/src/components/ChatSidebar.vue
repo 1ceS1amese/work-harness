@@ -7,6 +7,7 @@ import {
   Moon,
   Plus,
   Search,
+  Setting,
   Sunny,
 } from '@element-plus/icons-vue'
 
@@ -24,6 +25,7 @@ const emit = defineEmits<{
   create: []
   select: [id: string]
   delete: [id: string]
+  settings: []
   toggleTheme: []
 }>()
 
@@ -111,6 +113,10 @@ function lastStatus(conversation: Conversation): string {
     </div>
 
     <div class="sidebar-footer">
+      <button type="button" @click="emit('settings')">
+        <Setting />
+        系统设置
+      </button>
       <button type="button" @click="emit('toggleTheme')">
         <component :is="dark ? Sunny : Moon" />
         {{ dark ? '浅色模式' : '深色模式' }}

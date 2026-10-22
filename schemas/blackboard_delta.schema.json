@@ -1,0 +1,989 @@
+{
+  "$defs": {
+    "AcceptanceCriterion": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "description": {
+          "maxLength": 4000,
+          "minLength": 1,
+          "title": "Description",
+          "type": "string"
+        },
+        "claim_key": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Claim Key",
+          "type": "string"
+        },
+        "claim_type": {
+          "enum": [
+            "user_statement",
+            "file_content",
+            "tool_observation",
+            "derived",
+            "assessment",
+            "delivery"
+          ],
+          "title": "Claim Type",
+          "type": "string"
+        },
+        "scope": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Scope",
+          "type": "object"
+        },
+        "operator": {
+          "default": "exists",
+          "enum": [
+            "exists",
+            "equals",
+            "at_least",
+            "at_most"
+          ],
+          "title": "Operator",
+          "type": "string"
+        },
+        "expected": {
+          "$ref": "#/$defs/JsonValue",
+          "default": null
+        },
+        "required_checks": {
+          "default": [],
+          "items": {
+            "maxLength": 500,
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Required Checks",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "description",
+        "claim_key",
+        "claim_type"
+      ],
+      "title": "AcceptanceCriterion",
+      "type": "object"
+    },
+    "ContentRef": {
+      "additionalProperties": false,
+      "properties": {
+        "content_digest": {
+          "pattern": "^[a-f0-9]{64}$",
+          "title": "Content Digest",
+          "type": "string"
+        },
+        "media_type": {
+          "default": "text/plain",
+          "enum": [
+            "text/plain",
+            "text/markdown",
+            "application/json"
+          ],
+          "title": "Media Type",
+          "type": "string"
+        },
+        "size_bytes": {
+          "maximum": 2000000,
+          "minimum": 0,
+          "title": "Size Bytes",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "content_digest",
+        "size_bytes"
+      ],
+      "title": "ContentRef",
+      "type": "object"
+    },
+    "Evidence": {
+      "additionalProperties": false,
+      "properties": {
+        "source": {
+          "enum": [
+            "user_input",
+            "file",
+            "tool",
+            "rule",
+            "assessment",
+            "delivery"
+          ],
+          "title": "Source",
+          "type": "string"
+        },
+        "locator": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Locator",
+          "type": "string"
+        },
+        "content_digest": {
+          "pattern": "^[a-f0-9]{64}$",
+          "title": "Content Digest",
+          "type": "string"
+        },
+        "description": {
+          "maxLength": 4000,
+          "minLength": 1,
+          "title": "Description",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source",
+        "locator",
+        "content_digest",
+        "description"
+      ],
+      "title": "Evidence",
+      "type": "object"
+    },
+    "FactProposal": {
+      "additionalProperties": false,
+      "properties": {
+        "scope": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Scope",
+          "type": "object"
+        },
+        "topic": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Topic",
+          "type": "string"
+        },
+        "tags": {
+          "default": [],
+          "items": {
+            "maxLength": 500,
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Tags",
+          "type": "array"
+        },
+        "derived_from": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ObjectRef"
+          },
+          "title": "Derived From",
+          "type": "array"
+        },
+        "links": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Link"
+          },
+          "title": "Links",
+          "type": "array"
+        },
+        "attachments": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ContentRef"
+          },
+          "title": "Attachments",
+          "type": "array"
+        },
+        "kind": {
+          "const": "fact",
+          "default": "fact",
+          "title": "Kind",
+          "type": "string"
+        },
+        "statement": {
+          "maxLength": 20000,
+          "minLength": 1,
+          "title": "Statement",
+          "type": "string"
+        },
+        "claim_type": {
+          "enum": [
+            "user_statement",
+            "file_content",
+            "tool_observation",
+            "derived",
+            "assessment",
+            "delivery"
+          ],
+          "title": "Claim Type",
+          "type": "string"
+        },
+        "claim_key": {
+          "anyOf": [
+            {
+              "maxLength": 500,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Claim Key"
+        },
+        "value": {
+          "$ref": "#/$defs/JsonValue",
+          "default": null
+        },
+        "evidence": {
+          "items": {
+            "$ref": "#/$defs/Evidence"
+          },
+          "maxItems": 100,
+          "minItems": 1,
+          "title": "Evidence",
+          "type": "array"
+        },
+        "premise_refs": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ObjectRef"
+          },
+          "title": "Premise Refs",
+          "type": "array"
+        },
+        "valid_from": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Valid From"
+        },
+        "valid_until": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Valid Until"
+        },
+        "local_id": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Local Id",
+          "type": "string"
+        },
+        "verification_receipt_id": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Verification Receipt Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "topic",
+        "statement",
+        "claim_type",
+        "evidence",
+        "local_id",
+        "verification_receipt_id"
+      ],
+      "title": "FactProposal",
+      "type": "object"
+    },
+    "FactQuery": {
+      "additionalProperties": false,
+      "properties": {
+        "claim_key": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Claim Key",
+          "type": "string"
+        },
+        "claim_type": {
+          "anyOf": [
+            {
+              "enum": [
+                "user_statement",
+                "file_content",
+                "tool_observation",
+                "derived",
+                "assessment",
+                "delivery"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Claim Type"
+        },
+        "scope": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Scope",
+          "type": "object"
+        }
+      },
+      "required": [
+        "claim_key"
+      ],
+      "title": "FactQuery",
+      "type": "object"
+    },
+    "FactQueryPrecondition": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "fact_query",
+          "default": "fact_query",
+          "title": "Kind",
+          "type": "string"
+        },
+        "selector": {
+          "$ref": "#/$defs/ReadSelector"
+        },
+        "query": {
+          "$ref": "#/$defs/FactQuery"
+        },
+        "exists": {
+          "title": "Exists",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "selector",
+        "query",
+        "exists"
+      ],
+      "title": "FactQueryPrecondition",
+      "type": "object"
+    },
+    "GoalRevision": {
+      "additionalProperties": false,
+      "properties": {
+        "target": {
+          "$ref": "#/$defs/ObjectRef"
+        },
+        "objective": {
+          "maxLength": 20000,
+          "minLength": 1,
+          "title": "Objective",
+          "type": "string"
+        },
+        "acceptance": {
+          "items": {
+            "$ref": "#/$defs/AcceptanceCriterion"
+          },
+          "maxItems": 100,
+          "minItems": 1,
+          "title": "Acceptance",
+          "type": "array"
+        },
+        "reason": {
+          "maxLength": 4000,
+          "minLength": 1,
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "target",
+        "objective",
+        "acceptance",
+        "reason"
+      ],
+      "title": "GoalRevision",
+      "type": "object"
+    },
+    "HintProposal": {
+      "additionalProperties": false,
+      "properties": {
+        "scope": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Scope",
+          "type": "object"
+        },
+        "topic": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Topic",
+          "type": "string"
+        },
+        "tags": {
+          "default": [],
+          "items": {
+            "maxLength": 500,
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Tags",
+          "type": "array"
+        },
+        "derived_from": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ObjectRef"
+          },
+          "title": "Derived From",
+          "type": "array"
+        },
+        "links": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Link"
+          },
+          "title": "Links",
+          "type": "array"
+        },
+        "attachments": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ContentRef"
+          },
+          "title": "Attachments",
+          "type": "array"
+        },
+        "kind": {
+          "const": "hint",
+          "default": "hint",
+          "title": "Kind",
+          "type": "string"
+        },
+        "suggestion": {
+          "maxLength": 20000,
+          "minLength": 1,
+          "title": "Suggestion",
+          "type": "string"
+        },
+        "applies_when": {
+          "maxLength": 4000,
+          "minLength": 1,
+          "title": "Applies When",
+          "type": "string"
+        },
+        "rationale": {
+          "maxLength": 4000,
+          "minLength": 1,
+          "title": "Rationale",
+          "type": "string"
+        },
+        "source_refs": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ObjectRef"
+          },
+          "title": "Source Refs",
+          "type": "array"
+        },
+        "confidence": {
+          "anyOf": [
+            {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Confidence"
+        },
+        "expires_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Expires At"
+        },
+        "local_id": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Local Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "topic",
+        "suggestion",
+        "applies_when",
+        "rationale",
+        "local_id"
+      ],
+      "title": "HintProposal",
+      "type": "object"
+    },
+    "HintQueryPrecondition": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "hint_query",
+          "default": "hint_query",
+          "title": "Kind",
+          "type": "string"
+        },
+        "selector": {
+          "$ref": "#/$defs/ReadSelector"
+        },
+        "topic": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Topic",
+          "type": "string"
+        },
+        "exists": {
+          "title": "Exists",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "selector",
+        "topic",
+        "exists"
+      ],
+      "title": "HintQueryPrecondition",
+      "type": "object"
+    },
+    "IntentPrecondition": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "intent_open",
+          "default": "intent_open",
+          "title": "Kind",
+          "type": "string"
+        },
+        "intent_id": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Intent Id",
+          "type": "string"
+        },
+        "allow_blocked": {
+          "default": false,
+          "title": "Allow Blocked",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "intent_id"
+      ],
+      "title": "IntentPrecondition",
+      "type": "object"
+    },
+    "IntentProposal": {
+      "additionalProperties": false,
+      "properties": {
+        "scope": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Scope",
+          "type": "object"
+        },
+        "topic": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Topic",
+          "type": "string"
+        },
+        "tags": {
+          "default": [],
+          "items": {
+            "maxLength": 500,
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Tags",
+          "type": "array"
+        },
+        "derived_from": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ObjectRef"
+          },
+          "title": "Derived From",
+          "type": "array"
+        },
+        "links": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Link"
+          },
+          "title": "Links",
+          "type": "array"
+        },
+        "attachments": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ContentRef"
+          },
+          "title": "Attachments",
+          "type": "array"
+        },
+        "kind": {
+          "const": "intent",
+          "default": "intent",
+          "title": "Kind",
+          "type": "string"
+        },
+        "objective": {
+          "maxLength": 20000,
+          "minLength": 1,
+          "title": "Objective",
+          "type": "string"
+        },
+        "root_intent_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ObjectRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "parent_intent_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ObjectRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "acceptance": {
+          "items": {
+            "$ref": "#/$defs/AcceptanceCriterion"
+          },
+          "maxItems": 100,
+          "minItems": 1,
+          "title": "Acceptance",
+          "type": "array"
+        },
+        "priority": {
+          "default": 0,
+          "maximum": 100,
+          "minimum": 0,
+          "title": "Priority",
+          "type": "integer"
+        },
+        "local_id": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Local Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "topic",
+        "objective",
+        "acceptance",
+        "local_id"
+      ],
+      "title": "IntentProposal",
+      "type": "object"
+    },
+    "JsonValue": {},
+    "Link": {
+      "additionalProperties": false,
+      "properties": {
+        "relation": {
+          "enum": [
+            "contributes_to",
+            "refines",
+            "supports",
+            "contradicts",
+            "supersedes"
+          ],
+          "title": "Relation",
+          "type": "string"
+        },
+        "target": {
+          "$ref": "#/$defs/ObjectRef"
+        }
+      },
+      "required": [
+        "relation",
+        "target"
+      ],
+      "title": "Link",
+      "type": "object"
+    },
+    "ObjectChange": {
+      "additionalProperties": false,
+      "properties": {
+        "target": {
+          "$ref": "#/$defs/ObjectRef"
+        },
+        "action": {
+          "enum": [
+            "consume_hint",
+            "dismiss_hint",
+            "block_intent",
+            "reopen_intent",
+            "abandon_intent",
+            "retract_fact"
+          ],
+          "title": "Action",
+          "type": "string"
+        },
+        "reason": {
+          "maxLength": 4000,
+          "minLength": 1,
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "target",
+        "action",
+        "reason"
+      ],
+      "title": "ObjectChange",
+      "type": "object"
+    },
+    "ObjectRef": {
+      "additionalProperties": false,
+      "properties": {
+        "object_id": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Object Id",
+          "type": "string"
+        },
+        "revision": {
+          "minimum": 1,
+          "title": "Revision",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "object_id",
+        "revision"
+      ],
+      "title": "ObjectRef",
+      "type": "object"
+    },
+    "ReadSelector": {
+      "additionalProperties": false,
+      "description": "The same bounded branch/topic projection that was supplied to a source.",
+      "properties": {
+        "intent_id": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Intent Id",
+          "type": "string"
+        },
+        "input_topics": {
+          "default": [],
+          "items": {
+            "maxLength": 500,
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Input Topics",
+          "type": "array"
+        },
+        "accepted_kinds": {
+          "default": [
+            "fact",
+            "hint",
+            "intent"
+          ],
+          "items": {
+            "enum": [
+              "fact",
+              "intent",
+              "hint"
+            ],
+            "type": "string"
+          },
+          "title": "Accepted Kinds",
+          "type": "array"
+        }
+      },
+      "required": [
+        "intent_id"
+      ],
+      "title": "ReadSelector",
+      "type": "object"
+    },
+    "ViewPrecondition": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "view",
+          "default": "view",
+          "title": "Kind",
+          "type": "string"
+        },
+        "selector": {
+          "$ref": "#/$defs/ReadSelector"
+        },
+        "expected_refs": {
+          "items": {
+            "$ref": "#/$defs/ObjectRef"
+          },
+          "maxItems": 10000,
+          "title": "Expected Refs",
+          "type": "array"
+        }
+      },
+      "required": [
+        "selector",
+        "expected_refs"
+      ],
+      "title": "ViewPrecondition",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "expected_revision": {
+      "minimum": 0,
+      "title": "Expected Revision",
+      "type": "integer"
+    },
+    "idempotency_key": {
+      "maxLength": 500,
+      "minLength": 1,
+      "title": "Idempotency Key",
+      "type": "string"
+    },
+    "proposals": {
+      "default": [],
+      "items": {
+        "discriminator": {
+          "mapping": {
+            "fact": "#/$defs/FactProposal",
+            "hint": "#/$defs/HintProposal",
+            "intent": "#/$defs/IntentProposal"
+          },
+          "propertyName": "kind"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/$defs/FactProposal"
+          },
+          {
+            "$ref": "#/$defs/IntentProposal"
+          },
+          {
+            "$ref": "#/$defs/HintProposal"
+          }
+        ]
+      },
+      "maxItems": 100,
+      "title": "Proposals",
+      "type": "array"
+    },
+    "changes": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/ObjectChange"
+      },
+      "maxItems": 100,
+      "title": "Changes",
+      "type": "array"
+    },
+    "read_set": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/ObjectRef"
+      },
+      "maxItems": 10000,
+      "title": "Read Set",
+      "type": "array"
+    },
+    "concurrency": {
+      "default": "snapshot",
+      "enum": [
+        "snapshot",
+        "inputs"
+      ],
+      "title": "Concurrency",
+      "type": "string"
+    },
+    "preconditions": {
+      "default": [],
+      "items": {
+        "discriminator": {
+          "mapping": {
+            "fact_query": "#/$defs/FactQueryPrecondition",
+            "hint_query": "#/$defs/HintQueryPrecondition",
+            "intent_open": "#/$defs/IntentPrecondition",
+            "view": "#/$defs/ViewPrecondition"
+          },
+          "propertyName": "kind"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/$defs/FactQueryPrecondition"
+          },
+          {
+            "$ref": "#/$defs/HintQueryPrecondition"
+          },
+          {
+            "$ref": "#/$defs/ViewPrecondition"
+          },
+          {
+            "$ref": "#/$defs/IntentPrecondition"
+          }
+        ]
+      },
+      "maxItems": 256,
+      "title": "Preconditions",
+      "type": "array"
+    },
+    "goal_revision": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/GoalRevision"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    }
+  },
+  "required": [
+    "expected_revision",
+    "idempotency_key"
+  ],
+  "title": "BlackboardDelta",
+  "type": "object"
+}

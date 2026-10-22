@@ -14,7 +14,7 @@ VSVersionInfo(
       StringTable(
         u'040904B0',
         [StringStruct(u'CompanyName', u'Work Harness contributors'),
-         StringStruct(u'FileDescription', u'Work Harness desktop server'),
+         StringStruct(u'FileDescription', u'Work Harness desktop application'),
          StringStruct(u'FileVersion', u'0.2.2'),
          StringStruct(u'InternalName', u'work-harness'),
          StringStruct(u'LegalCopyright', u'Copyright (c) 2026 Work Harness contributors'),

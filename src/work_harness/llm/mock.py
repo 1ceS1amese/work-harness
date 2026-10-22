@@ -54,8 +54,7 @@ class MockProvider:
                         "logical_model": "worker-fast",
                         "allowed_tools": [],
                         "acceptance_criteria": ["Core requirements and assumptions are explicit"],
-                        "token_budget": 3000,
-                        "cost_budget_usd": 0.2,
+                        "max_output_tokens": 3000,
                     },
                     {
                         "subtask_id": "delivery",
@@ -68,8 +67,7 @@ class MockProvider:
                         "acceptance_criteria": [
                             "Result is concrete and follows stated constraints"
                         ],
-                        "token_budget": 3000,
-                        "cost_budget_usd": 0.2,
+                        "max_output_tokens": 3000,
                     },
                 ],
             }

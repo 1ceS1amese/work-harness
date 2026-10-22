@@ -4,17 +4,25 @@ import operator
 from typing import Annotated, Any, TypedDict
 
 
+def merge_interactions(
+    current: list[dict[str, Any]], incoming: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    merged = {item["interaction_id"]: item for item in current}
+    for item in incoming:
+        merged[item["interaction_id"]] = item
+    return list(merged.values())
+
+
 class GraphState(TypedDict, total=False):
     run_id: str
+    workflow_revision: str
     raw_input: dict[str, Any]
     task: dict[str, Any]
     plan: dict[str, Any]
     pending_subtasks: list[dict[str, Any]]
-    subtask: dict[str, Any]
-    artifact_version: int
+    required_versions: dict[str, int]
     artifacts: Annotated[list[dict[str, Any]], operator.add]
     validation_issues: list[dict[str, Any]]
-    review_job: dict[str, Any]
     reviews: Annotated[list[dict[str, Any]], operator.add]
     decision: dict[str, Any]
     repair_round: int
@@ -23,6 +31,7 @@ class GraphState(TypedDict, total=False):
     errors: Annotated[list[dict[str, Any]], operator.add]
     model_calls: Annotated[list[dict[str, Any]], operator.add]
     tool_calls: Annotated[list[dict[str, Any]], operator.add]
+    agent_interactions: Annotated[list[dict[str, Any]], merge_interactions]
 
 
 def latest_artifacts(items: list[dict[str, Any]]) -> list[dict[str, Any]]:

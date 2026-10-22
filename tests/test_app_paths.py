@@ -29,14 +29,21 @@ def test_application_data_override_and_store_defaults(tmp_path: Path) -> None:
     assert paths.logs.is_dir()
     assert paths.reports.is_dir()
     assert paths.exports.is_dir()
+    assert environment["WORK_HARNESS_PROFILE"] == "setup"
     assert environment["WORK_HARNESS_CHECKPOINT_PATH"] == str(
         root / "data" / "checkpoints.sqlite"
+    )
+    assert environment["WORK_HARNESS_BLACKBOARD_PATH"] == str(
+        root / "data" / "blackboard.sqlite"
     )
     assert environment["WORK_HARNESS_RUN_STORE_PATH"] == str(
         tmp_path / "explicit-runs.sqlite"
     )
     assert environment["WORK_HARNESS_PROVIDER_STORE_PATH"] == str(
         root / "data" / "providers.sqlite"
+    )
+    assert environment["WORK_HARNESS_SETTINGS_PATH"] == str(
+        root / "data" / "settings.json"
     )
     assert environment["WORK_HARNESS_EVALUATION_OUTPUT"] == str(
         root / "reports" / "latest-evaluation.json"

@@ -58,4 +58,11 @@ describe('run progress mapping', () => {
   it('uses the final output for a successful run', () => {
     expect(resultMessage(makeRun({ status: 'succeeded', output: '完成结果' }))).toBe('完成结果')
   })
+
+  it('uses goal-oriented status without a made-up completion percentage for blackboard runs', () => {
+    const run = makeRun({ engine: 'blackboard', status: 'waiting_human', output: '请确认地区' })
+    expect(getRunStage(run)).toMatchObject({ label: '等待补充', progress: null })
+    expect(resultMessage(run)).toBe('请确认地区')
+    expect(getRunStage({ ...run, status: 'succeeded' }).label).toBe('验收已满足')
+  })
 })

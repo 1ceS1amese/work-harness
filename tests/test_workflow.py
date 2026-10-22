@@ -1,4 +1,9 @@
 import asyncio
+import os
+import subprocess
+import sys
+from dataclasses import replace
+from datetime import timedelta
 from pathlib import Path
 
 import pytest
@@ -10,13 +15,60 @@ from work_harness.domain.models import (
     SkillSelection,
     TaskRequest,
     Usage,
+    utc_now,
 )
 from work_harness.llm.mock import MockProvider
 from work_harness.runtime import build_runtime
-from work_harness.service import RunManager
+from work_harness.service import (
+    IdempotencyConflictError,
+    RunCapacityError,
+    RunManager,
+)
 from work_harness.storage import RunRecord
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+
+pytestmark = pytest.mark.usefixtures("legacy_engine")
+
+def test_execution_fingerprint_is_stable_across_python_hash_seeds() -> None:
+    payload = {
+        "capabilities": {
+            "chat",
+            "structured_output",
+            "tool_calling",
+            "vision",
+            "streaming",
+        },
+        "nested": [{"risk_levels": {"critical", "high", "medium", "low"}}],
+    }
+    expected = RunManager._fingerprint(
+        {
+            "capabilities": [
+                "chat",
+                "streaming",
+                "structured_output",
+                "tool_calling",
+                "vision",
+            ],
+            "nested": [{"risk_levels": ["critical", "high", "low", "medium"]}],
+        }
+    )
+    script = (
+        "from work_harness.service import RunManager; "
+        f"print(RunManager._fingerprint({payload!r}))"
+    )
+
+    for seed in ("1", "2", "314159"):
+        environment = os.environ.copy()
+        environment["PYTHONHASHSEED"] = seed
+        actual = subprocess.check_output(
+            [sys.executable, "-c", script],
+            cwd=PROJECT_ROOT,
+            env=environment,
+            text=True,
+        ).strip()
+        assert actual == expected
 
 
 @pytest.mark.asyncio
@@ -52,6 +104,10 @@ async def test_high_risk_run_interrupts_and_resumes() -> None:
         }
 
         await manager.resume(run_id, approved=True, note="test approval")
+        resuming = await manager.get(run_id)
+        assert resuming.status == RunStatus.RUNNING
+        persisted = await runtime.run_store.get(run_id)
+        assert persisted is not None and persisted.status == RunStatus.RUNNING
         completed = await manager.wait(run_id)
 
     assert completed.status == RunStatus.SUCCEEDED
@@ -185,6 +241,58 @@ async def test_worker_executes_advertised_tool_calls(
 
 
 @pytest.mark.asyncio
+async def test_scheduler_owns_artifact_and_review_routing_fields(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original_complete = MockProvider.complete
+
+    async def complete_with_wrong_routing(self, request, *, model):
+        response = await original_complete(self, request, model=model)
+        structured = dict(response.structured_output or {})
+        operation = request.metadata.get("operation")
+        if operation == "worker":
+            structured.update(
+                {
+                    "run_id": "run_from_untrusted_model",
+                    "subtask_id": "wrong-subtask",
+                    "producer": "wrong-agent",
+                    "version": 99,
+                }
+            )
+        elif operation == "review":
+            structured.update(
+                {
+                    "artifact_id": "artifact_from_untrusted_model",
+                    "artifact_version": 99,
+                    "reviewer": "wrong-reviewer",
+                    "dimension": "wrong-dimension",
+                }
+            )
+        return response.model_copy(update={"structured_output": structured})
+
+    monkeypatch.setattr(MockProvider, "complete", complete_with_wrong_routing)
+    async with build_runtime(PROJECT_ROOT, checkpoint_backend="memory") as runtime:
+        manager = RunManager(runtime)
+        run_id = await manager.start(TaskRequest(goal="Verify provider routing invariants"))
+        result = await manager.wait(run_id)
+
+    assert result.status == RunStatus.SUCCEEDED
+    assert result.plan is not None
+    planned = {item.subtask_id: item for item in result.plan.subtasks}
+    assert {item.subtask_id for item in result.artifacts} == set(planned)
+    assert all(item.run_id == run_id and item.version == 1 for item in result.artifacts)
+    assert all(item.producer == planned[item.subtask_id].worker_role for item in result.artifacts)
+    artifacts = {item.artifact_id: item for item in result.artifacts}
+    assert all(item.artifact_id in artifacts for item in result.reviews)
+    assert all(
+        item.artifact_version == artifacts[item.artifact_id].version
+        for item in result.reviews
+    )
+    assert {item.reviewer for item in result.reviews} == {"reviewer"}
+    assert {item.dimension for item in result.reviews} == {"comprehensive"}
+
+
+@pytest.mark.asyncio
 async def test_sqlite_checkpoint_recovers_after_runtime_restart(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -288,3 +396,284 @@ async def test_run_manager_bounds_concurrent_graph_runs(
 
     assert first_result.status == RunStatus.SUCCEEDED
     assert second_result.status == RunStatus.SUCCEEDED
+
+
+@pytest.mark.asyncio
+async def test_run_manager_rejects_new_work_when_admission_queue_is_full(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    release_provider = asyncio.Event()
+    original_complete = MockProvider.complete
+
+    async def blocked_complete(self, request, *, model):
+        await release_provider.wait()
+        return await original_complete(self, request, model=model)
+
+    monkeypatch.setattr(MockProvider, "complete", blocked_complete)
+    async with build_runtime(PROJECT_ROOT, checkpoint_backend="memory") as runtime:
+        runtime.config.runtime.run_max_concurrency = 1
+        runtime.config.runtime.run_queue_capacity = 1
+        runtime.config.runtime.run_queue_retry_after_seconds = 7
+        manager = RunManager(runtime)
+        first_request = TaskRequest(
+            goal="First admitted run",
+            idempotency_key="first-admission-key",
+        )
+        first = await manager.start(first_request)
+        second = await manager.start(
+            TaskRequest(
+                goal="Second admitted run",
+                idempotency_key="second-admission-key",
+            )
+        )
+        await asyncio.sleep(0)
+
+        assert await manager.start(first_request) == first
+        with pytest.raises(IdempotencyConflictError):
+            await manager.start(
+                TaskRequest(
+                    goal="Conflicting retry",
+                    idempotency_key="first-admission-key",
+                )
+            )
+        with pytest.raises(RunCapacityError) as rejected:
+            await manager.start(TaskRequest(goal="Rejected third run"))
+
+        stats = manager.stats()
+        assert rejected.value.retry_after_seconds == 7
+        assert stats["active_runs"] == 1
+        assert stats["queued_runs"] == 1
+        assert stats["inflight_runs"] == 2
+        assert stats["inflight_capacity"] == 2
+        assert stats["available_admission_slots"] == 0
+        assert stats["admitted_runs_total"] == 2
+        assert stats["rejected_runs_total"] == 1
+
+        release_provider.set()
+        first_result, second_result = await asyncio.gather(
+            manager.wait(first),
+            manager.wait(second),
+        )
+        assert manager.stats()["available_admission_slots"] == 2
+
+    assert first_result.status == RunStatus.SUCCEEDED
+    assert second_result.status == RunStatus.SUCCEEDED
+
+
+@pytest.mark.asyncio
+async def test_recovery_scan_obeys_admission_capacity() -> None:
+    class Snapshot:
+        def __init__(self, values):
+            self.values = values
+
+    class RecoverableGraph:
+        def __init__(self):
+            self.values = {
+                "run_recovery_a": {"run_id": "run_recovery_a", "status": "running"},
+                "run_recovery_b": {"run_id": "run_recovery_b", "status": "running"},
+            }
+            self.release = asyncio.Event()
+
+        async def aget_state(self, config):
+            run_id = config["configurable"]["thread_id"]
+            return Snapshot(dict(self.values[run_id]))
+
+        async def ainvoke(self, input_value, config):
+            assert input_value is None
+            run_id = config["configurable"]["thread_id"]
+            await self.release.wait()
+            self.values[run_id]["status"] = "succeeded"
+
+    async with build_runtime(PROJECT_ROOT, checkpoint_backend="memory") as runtime:
+        graph = RecoverableGraph()
+        runtime.graph = graph
+        runtime.config.runtime.run_max_concurrency = 1
+        runtime.config.runtime.run_queue_capacity = 0
+        for run_id in graph.values:
+            await runtime.run_store.reserve(
+                RunRecord(run_id=run_id, status=RunStatus.RUNNING)
+            )
+
+        manager = RunManager(runtime)
+        first_batch = await manager.recover_incomplete()
+        assert len(first_batch) == 1
+        assert manager.stats()["recovery_backlog_observed"] == 1
+        assert manager.stats()["recovered_runs_total"] == 1
+
+        graph.release.set()
+        await manager.wait(first_batch[0])
+        second_batch = await manager.recover_incomplete()
+        assert set(second_batch) == set(graph.values) - set(first_batch)
+        await manager.wait(second_batch[0])
+
+        assert manager.stats()["recovered_runs_total"] == 2
+        assert manager.stats()["recovery_backlog_observed"] == 0
+
+
+@pytest.mark.asyncio
+async def test_two_worker_managers_consume_shared_queue_without_duplicate_execution(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls_by_run: dict[str, int] = {}
+    original_complete = MockProvider.complete
+
+    async def counted_complete(self, request, *, model):
+        calls_by_run[request.run_id] = calls_by_run.get(request.run_id, 0) + 1
+        await asyncio.sleep(0.001)
+        return await original_complete(self, request, model=model)
+
+    monkeypatch.setattr(MockProvider, "complete", counted_complete)
+    async with build_runtime(PROJECT_ROOT, checkpoint_backend="memory") as runtime:
+        api_config = runtime.config.model_copy(deep=True)
+        api_config.runtime.execution.role = "api"
+        api_config.runtime.run_max_concurrency = 1
+        worker_a_config = runtime.config.model_copy(deep=True)
+        worker_a_config.runtime.execution.role = "worker"
+        worker_a_config.runtime.run_max_concurrency = 1
+        worker_b_config = worker_a_config.model_copy(deep=True)
+        api_runtime = replace(runtime, config=api_config)
+        worker_a_runtime = replace(runtime, config=worker_a_config)
+        worker_b_runtime = replace(runtime, config=worker_b_config)
+        api = RunManager(api_runtime)
+        worker_a = RunManager(worker_a_runtime)
+        worker_b = RunManager(worker_b_runtime)
+        await api.initialize()
+        await worker_a.initialize()
+        await worker_b.initialize()
+        try:
+            live_workers = await runtime.run_store.list_live_workers(stale_seconds=30)
+            assert len(live_workers) == 2
+            assert sum(item.capacity for item in live_workers) == 2
+            run_ids = [
+                await api.start(TaskRequest(goal=f"Distributed run {index}"))
+                for index in range(6)
+            ]
+            for _ in range(200):
+                stats = await runtime.run_store.queue_stats()
+                if stats.completed_jobs == len(run_ids):
+                    break
+                await asyncio.sleep(0.01)
+            else:
+                pytest.fail("shared queue did not drain before the test deadline")
+
+            results = [await api.get(run_id) for run_id in run_ids]
+        finally:
+            await worker_a.close()
+            await worker_b.close()
+            await api.close()
+        assert await runtime.run_store.list_live_workers(stale_seconds=30) == []
+
+    assert all(result.status == RunStatus.SUCCEEDED for result in results)
+    assert set(calls_by_run) == set(run_ids)
+    assert all(count == 7 for count in calls_by_run.values())
+
+
+@pytest.mark.asyncio
+async def test_reclaimed_queue_job_resumes_existing_checkpoint_without_restarting() -> None:
+    class Snapshot:
+        def __init__(self, values):
+            self.values = values
+
+    class ReclaimedGraph:
+        def __init__(self):
+            self.values = {"run_id": "run_reclaimed", "status": "running"}
+            self.input_value = "not-called"
+
+        async def aget_state(self, _):
+            return Snapshot(dict(self.values))
+
+        async def ainvoke(self, input_value, _):
+            self.input_value = input_value
+            self.values["status"] = "succeeded"
+
+    async with build_runtime(PROJECT_ROOT, checkpoint_backend="memory") as runtime:
+        graph = ReclaimedGraph()
+        runtime.graph = graph
+        worker_config = runtime.config.model_copy(deep=True)
+        worker_config.runtime.execution.role = "worker"
+        worker = RunManager(replace(runtime, config=worker_config))
+        await runtime.run_store.submit(
+            RunRecord(run_id="run_reclaimed"),
+            {"goal": "must not restart from raw input"},
+            capacity=2,
+            max_attempts=3,
+            graph_revision=worker.execution_fingerprint,
+        )
+        abandoned = await runtime.run_store.claim_job(
+            owner="crashed-worker",
+            lease_seconds=30,
+            graph_revision=worker.execution_fingerprint,
+        )
+        assert abandoned is not None
+        runtime.run_store._jobs[abandoned.job_id] = abandoned.model_copy(
+            update={"lease_expires_at": utc_now() - timedelta(seconds=1)}
+        )
+        await worker.initialize()
+        try:
+            for _ in range(100):
+                record = await runtime.run_store.get("run_reclaimed")
+                if record and record.status == RunStatus.SUCCEEDED:
+                    break
+                await asyncio.sleep(0.01)
+            else:
+                pytest.fail("reclaimed run did not complete")
+        finally:
+            await worker.close()
+
+    assert graph.input_value is None
+
+
+@pytest.mark.asyncio
+async def test_attempt_exhaustion_reconciles_terminal_checkpoint_before_dead_letter() -> None:
+    class Snapshot:
+        values = {"run_id": "run_reconcile_terminal", "status": "succeeded"}
+
+    class TerminalGraph:
+        invoked = False
+
+        async def aget_state(self, _):
+            return Snapshot()
+
+        async def ainvoke(self, *_):
+            self.invoked = True
+            raise AssertionError("terminal checkpoint must not run again")
+
+    async with build_runtime(PROJECT_ROOT, checkpoint_backend="memory") as runtime:
+        graph = TerminalGraph()
+        runtime.graph = graph
+        worker_config = runtime.config.model_copy(deep=True)
+        worker_config.runtime.execution.role = "worker"
+        worker = RunManager(replace(runtime, config=worker_config))
+        await runtime.run_store.submit(
+            RunRecord(run_id="run_reconcile_terminal"),
+            {"goal": "already completed before ack"},
+            capacity=2,
+            max_attempts=1,
+            graph_revision=worker.execution_fingerprint,
+        )
+        abandoned = await runtime.run_store.claim_job(
+            owner="crashed-worker",
+            lease_seconds=30,
+            graph_revision=worker.execution_fingerprint,
+        )
+        assert abandoned is not None
+        runtime.run_store._jobs[abandoned.job_id] = abandoned.model_copy(
+            update={"lease_expires_at": utc_now() - timedelta(seconds=1)}
+        )
+
+        await worker.initialize()
+        try:
+            for _ in range(100):
+                stats = await runtime.run_store.queue_stats()
+                if stats.completed_jobs == 1:
+                    break
+                await asyncio.sleep(0.01)
+            else:
+                pytest.fail("terminal checkpoint was not reconciled")
+        finally:
+            await worker.close()
+
+        record = await runtime.run_store.get("run_reconcile_terminal")
+        assert record is not None and record.status == RunStatus.SUCCEEDED
+        assert graph.invoked is False
+        assert (await runtime.run_store.queue_stats()).dead_jobs == 0

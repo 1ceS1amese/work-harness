@@ -1,12 +1,20 @@
 # 项目现状地图与架构诊断
 
+当前源码已增加状态驱动的黑板引擎：RunManager 固定运行身份，黑板控制器读取已提交的
+Fact、Intent、Hint，选择知识源并验证增量。知识源内部可使用独立 LangGraph 子图，业务事实
+与执行账本进入黑板存储，Checkpoint 保留控制状态和私有执行进度。共享状态不再依赖全局
+Planner/Reviewer 阶段；下文固定流水线描述保留为旧引擎诊断。
+
+新 Run 默认使用黑板，legacy 保留显式入口；真实对照、恢复验证及部署范围见
+[黑板实施计划](blackboard-design.md)。
+
 ## 扫描基线
 
 初始仓库只有 `agent.md`，共 1095 行；没有源码、入口、依赖文件、测试、配置实现、运行日志、评估脚本或版本库。因此本轮属于从设计文档落地首版工程，不存在可保持兼容的旧调用链。
 
 原始设计明确提出：LangGraph 是唯一编排器；Pydantic 定义状态与产物协议；模型、工具、外部 Agent 分别经过独立 Adapter；支持 Checkpoint、审查、局部返工、人工介入和离线评估。这些是实现输入，不是项目中已经存在的能力。
 
-## 当前调用链
+## 兼容旧引擎调用链
 
 ```text
 CLI / Agent API
@@ -28,9 +36,9 @@ LangGraph 节点只引用逻辑模型。`ModelGateway` 将逻辑模型路由到 
 
 ## 持久化边界
 
-运行保存拆分为三个可替换边界：LangGraph Checkpoint 保存完整 Graph State；`RunStore` 保存运行索引、状态和哈希指纹；前端 `ConversationStorage` 保存浏览器群聊状态。`RunManager` 通过 `HarnessRuntime` 注入 RunStore，不直接依赖 SQLite。
+运行保存拆分为四个可替换边界：LangGraph Checkpoint 保存完整 Graph State；`RunStore` 保存运行索引、状态和哈希指纹；`ReliableRunStore` 在分布式模式保存可领取 Job；前端 `ConversationStorage` 保存浏览器群聊状态。`RunManager` 通过 `HarnessRuntime` 注入 Store，不直接依赖具体数据库。
 
-默认 SQLite 模式分别使用 `var/checkpoints.sqlite` 和 `var/runs.sqlite`。测试与离线评估使用 Memory 模式，避免污染本地持久化数据。相同幂等键通过 RunStore 的原子唯一约束复用原 run_id，请求指纹不一致时拒绝复用。运行租约、心跳和扫描器在单实例环境中续接过期 Checkpoint，并拒绝没有 Checkpoint 的猜测性重放。详细合同与恢复边界见 `docs/persistence.md`。
+默认 embedded 模式分别使用 `var/checkpoints.sqlite` 和 `var/runs.sqlite`。测试与离线评估使用 Memory 模式，避免污染本地持久化数据。相同幂等键通过 RunStore 的原子唯一约束复用原 run_id，请求指纹不一致时拒绝复用。单实例由运行租约、心跳和扫描器续接 Checkpoint；distributed 模式则使用 PostgreSQL 原子 Run/Job、`SKIP LOCKED`、fencing token 和共享 Checkpoint。详细合同与恢复边界见 `docs/persistence.md` 和 `docs/distributed-run-queue.md`。
 
 ## 群聊式智能成员分配层
 
@@ -73,8 +81,8 @@ LangGraph 节点只引用逻辑模型。`ModelGateway` 将逻辑模型路由到 
 - 实际模型供应商、模型名、价格与数据驻留要求；
 - 真实业务工具及其审批人、幂等规则和允许域名；
 - 面向用户的任务类型和质量评分标准；
-- 生产持久化选 PostgreSQL、托管 LangGraph 服务或其他后端；
-- API 的身份系统、队列、限流和多租户边界。
+- 现有 PostgreSQL 模式在目标负载下的容量、备份和数据库权限方案；
+- API 的组织身份、分布式限流、多租户与死信管理授权边界。
 
 ## 评估解释边界
 

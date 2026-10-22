@@ -1,0 +1,295 @@
+{
+  "$defs": {
+    "AcceptanceCriterion": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "description": {
+          "maxLength": 4000,
+          "minLength": 1,
+          "title": "Description",
+          "type": "string"
+        },
+        "claim_key": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Claim Key",
+          "type": "string"
+        },
+        "claim_type": {
+          "enum": [
+            "user_statement",
+            "file_content",
+            "tool_observation",
+            "derived",
+            "assessment",
+            "delivery"
+          ],
+          "title": "Claim Type",
+          "type": "string"
+        },
+        "scope": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Scope",
+          "type": "object"
+        },
+        "operator": {
+          "default": "exists",
+          "enum": [
+            "exists",
+            "equals",
+            "at_least",
+            "at_most"
+          ],
+          "title": "Operator",
+          "type": "string"
+        },
+        "expected": {
+          "$ref": "#/$defs/JsonValue",
+          "default": null
+        },
+        "required_checks": {
+          "default": [],
+          "items": {
+            "maxLength": 500,
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Required Checks",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "description",
+        "claim_key",
+        "claim_type"
+      ],
+      "title": "AcceptanceCriterion",
+      "type": "object"
+    },
+    "AddInformation": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "add_information",
+          "default": "add_information",
+          "title": "Kind",
+          "type": "string"
+        },
+        "text": {
+          "maxLength": 20000,
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "text"
+      ],
+      "title": "AddInformation",
+      "type": "object"
+    },
+    "AuthorizeOperation": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "authorize_operation",
+          "default": "authorize_operation",
+          "title": "Kind",
+          "type": "string"
+        },
+        "tool_name": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Tool Name",
+          "type": "string"
+        },
+        "arguments": {
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "title": "Arguments",
+          "type": "object"
+        },
+        "approved": {
+          "title": "Approved",
+          "type": "boolean"
+        },
+        "expires_at": {
+          "format": "date-time",
+          "title": "Expires At",
+          "type": "string"
+        }
+      },
+      "required": [
+        "tool_name",
+        "arguments",
+        "approved",
+        "expires_at"
+      ],
+      "title": "AuthorizeOperation",
+      "type": "object"
+    },
+    "ConfirmStatement": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "confirm_statement",
+          "default": "confirm_statement",
+          "title": "Kind",
+          "type": "string"
+        },
+        "claim_key": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Claim Key",
+          "type": "string"
+        },
+        "statement": {
+          "maxLength": 19000,
+          "minLength": 1,
+          "title": "Statement",
+          "type": "string"
+        },
+        "value": {
+          "$ref": "#/$defs/JsonValue"
+        },
+        "scope": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Scope",
+          "type": "object"
+        }
+      },
+      "required": [
+        "claim_key",
+        "statement",
+        "value"
+      ],
+      "title": "ConfirmStatement",
+      "type": "object"
+    },
+    "JsonValue": {},
+    "ObjectRef": {
+      "additionalProperties": false,
+      "properties": {
+        "object_id": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Object Id",
+          "type": "string"
+        },
+        "revision": {
+          "minimum": 1,
+          "title": "Revision",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "object_id",
+        "revision"
+      ],
+      "title": "ObjectRef",
+      "type": "object"
+    },
+    "ReviseGoal": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "revise_goal",
+          "default": "revise_goal",
+          "title": "Kind",
+          "type": "string"
+        },
+        "objective": {
+          "maxLength": 20000,
+          "minLength": 1,
+          "title": "Objective",
+          "type": "string"
+        },
+        "acceptance": {
+          "items": {
+            "$ref": "#/$defs/AcceptanceCriterion"
+          },
+          "maxItems": 100,
+          "minItems": 1,
+          "title": "Acceptance",
+          "type": "array"
+        },
+        "reason": {
+          "maxLength": 4000,
+          "minLength": 1,
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "objective",
+        "acceptance",
+        "reason"
+      ],
+      "title": "ReviseGoal",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "idempotency_key": {
+      "maxLength": 160,
+      "minLength": 1,
+      "title": "Idempotency Key",
+      "type": "string"
+    },
+    "expected_revision": {
+      "minimum": 1,
+      "title": "Expected Revision",
+      "type": "integer"
+    },
+    "target": {
+      "$ref": "#/$defs/ObjectRef"
+    },
+    "command": {
+      "discriminator": {
+        "mapping": {
+          "add_information": "#/$defs/AddInformation",
+          "authorize_operation": "#/$defs/AuthorizeOperation",
+          "confirm_statement": "#/$defs/ConfirmStatement",
+          "revise_goal": "#/$defs/ReviseGoal"
+        },
+        "propertyName": "kind"
+      },
+      "oneOf": [
+        {
+          "$ref": "#/$defs/AddInformation"
+        },
+        {
+          "$ref": "#/$defs/ConfirmStatement"
+        },
+        {
+          "$ref": "#/$defs/ReviseGoal"
+        },
+        {
+          "$ref": "#/$defs/AuthorizeOperation"
+        }
+      ],
+      "title": "Command"
+    }
+  },
+  "required": [
+    "idempotency_key",
+    "expected_revision",
+    "target",
+    "command"
+  ],
+  "title": "HumanInput",
+  "type": "object"
+}

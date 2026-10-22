@@ -43,9 +43,7 @@ class ModelGateway:
         configured_candidates = list(logical.candidates)
         if agent_route is not None:
             configured_candidates = [agent_route] + [
-                candidate
-                for candidate in configured_candidates
-                if candidate != agent_route
+                candidate for candidate in configured_candidates if candidate != agent_route
             ]
         candidate_providers = {candidate.provider for candidate in configured_candidates}
         unknown_allowlist = request.provider_allowlist - candidate_providers
@@ -101,6 +99,12 @@ class ModelGateway:
                     )
                     return response.model_copy(
                         update={
+                            "usage": response.usage.model_copy(
+                                update={
+                                    "usage_complete": response.usage.usage_complete
+                                    and last_error is None,
+                                }
+                            ),
                             "retries": attempt,
                             "fallback_from": fallback_from,
                         }

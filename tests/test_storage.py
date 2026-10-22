@@ -30,6 +30,7 @@ async def test_memory_store_reserves_idempotency_atomically() -> None:
 
     assert await store.reserve(first) == first
     assert await store.reserve(duplicate) == first
+    assert await store.get_by_idempotency_key_hash("a" * 64) == first
     assert [item.run_id for item in await store.list()] == ["run_first"]
 
 
@@ -54,6 +55,7 @@ async def test_sqlite_store_survives_reopen(tmp_path: Path) -> None:
 
     assert recovered is not None
     assert recovered.status == RunStatus.WAITING_HUMAN
+    assert await reopened.get_by_idempotency_key_hash("c" * 64) == recovered
     assert [item.run_id for item in await reopened.list()] == ["run_persisted"]
     await reopened.close()
 

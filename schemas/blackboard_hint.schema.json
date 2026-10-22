@@ -1,0 +1,275 @@
+{
+  "$defs": {
+    "ContentRef": {
+      "additionalProperties": false,
+      "properties": {
+        "content_digest": {
+          "pattern": "^[a-f0-9]{64}$",
+          "title": "Content Digest",
+          "type": "string"
+        },
+        "media_type": {
+          "default": "text/plain",
+          "enum": [
+            "text/plain",
+            "text/markdown",
+            "application/json"
+          ],
+          "title": "Media Type",
+          "type": "string"
+        },
+        "size_bytes": {
+          "maximum": 2000000,
+          "minimum": 0,
+          "title": "Size Bytes",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "content_digest",
+        "size_bytes"
+      ],
+      "title": "ContentRef",
+      "type": "object"
+    },
+    "Link": {
+      "additionalProperties": false,
+      "properties": {
+        "relation": {
+          "enum": [
+            "contributes_to",
+            "refines",
+            "supports",
+            "contradicts",
+            "supersedes"
+          ],
+          "title": "Relation",
+          "type": "string"
+        },
+        "target": {
+          "$ref": "#/$defs/ObjectRef"
+        }
+      },
+      "required": [
+        "relation",
+        "target"
+      ],
+      "title": "Link",
+      "type": "object"
+    },
+    "ObjectRef": {
+      "additionalProperties": false,
+      "properties": {
+        "object_id": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Object Id",
+          "type": "string"
+        },
+        "revision": {
+          "minimum": 1,
+          "title": "Revision",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "object_id",
+        "revision"
+      ],
+      "title": "ObjectRef",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "scope": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "title": "Scope",
+      "type": "object"
+    },
+    "topic": {
+      "maxLength": 500,
+      "minLength": 1,
+      "title": "Topic",
+      "type": "string"
+    },
+    "tags": {
+      "default": [],
+      "items": {
+        "maxLength": 500,
+        "minLength": 1,
+        "type": "string"
+      },
+      "title": "Tags",
+      "type": "array"
+    },
+    "derived_from": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/ObjectRef"
+      },
+      "title": "Derived From",
+      "type": "array"
+    },
+    "links": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/Link"
+      },
+      "title": "Links",
+      "type": "array"
+    },
+    "attachments": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/ContentRef"
+      },
+      "title": "Attachments",
+      "type": "array"
+    },
+    "kind": {
+      "const": "hint",
+      "default": "hint",
+      "title": "Kind",
+      "type": "string"
+    },
+    "suggestion": {
+      "maxLength": 20000,
+      "minLength": 1,
+      "title": "Suggestion",
+      "type": "string"
+    },
+    "applies_when": {
+      "maxLength": 4000,
+      "minLength": 1,
+      "title": "Applies When",
+      "type": "string"
+    },
+    "rationale": {
+      "maxLength": 4000,
+      "minLength": 1,
+      "title": "Rationale",
+      "type": "string"
+    },
+    "source_refs": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/ObjectRef"
+      },
+      "title": "Source Refs",
+      "type": "array"
+    },
+    "confidence": {
+      "anyOf": [
+        {
+          "maximum": 1,
+          "minimum": 0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Confidence"
+    },
+    "expires_at": {
+      "anyOf": [
+        {
+          "format": "date-time",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Expires At"
+    },
+    "id": {
+      "maxLength": 500,
+      "minLength": 1,
+      "title": "Id",
+      "type": "string"
+    },
+    "board_id": {
+      "maxLength": 500,
+      "minLength": 1,
+      "title": "Board Id",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": 1,
+      "default": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    },
+    "revision": {
+      "minimum": 1,
+      "title": "Revision",
+      "type": "integer"
+    },
+    "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+    },
+    "created_by": {
+      "maxLength": 500,
+      "minLength": 1,
+      "title": "Created By",
+      "type": "string"
+    },
+    "origin_activation_id": {
+      "anyOf": [
+        {
+          "maxLength": 500,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Origin Activation Id"
+    },
+    "content_digest": {
+      "pattern": "^[a-f0-9]{64}$",
+      "title": "Content Digest",
+      "type": "string"
+    },
+    "status": {
+      "default": "active",
+      "enum": [
+        "active",
+        "consumed",
+        "dismissed",
+        "expired"
+      ],
+      "title": "Status",
+      "type": "string"
+    },
+    "status_reason": {
+      "default": "",
+      "title": "Status Reason",
+      "type": "string"
+    }
+  },
+  "required": [
+    "topic",
+    "suggestion",
+    "applies_when",
+    "rationale",
+    "id",
+    "board_id",
+    "revision",
+    "created_at",
+    "created_by",
+    "content_digest"
+  ],
+  "title": "Hint",
+  "type": "object"
+}

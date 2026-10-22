@@ -69,14 +69,22 @@ def prepare_application_environment(
     )
     for directory in (paths.data, paths.logs, paths.reports, paths.exports):
         directory.mkdir(parents=True, exist_ok=True)
+    # Packaged applications must never silently run the deterministic Mock Provider.
+    # Developers can still opt in with WORK_HARNESS_PROFILE=local.
+    values.setdefault("WORK_HARNESS_PROFILE", "setup")
     values.setdefault(
         "WORK_HARNESS_CHECKPOINT_PATH",
         str(paths.data / "checkpoints.sqlite"),
     )
     values.setdefault("WORK_HARNESS_RUN_STORE_PATH", str(paths.data / "runs.sqlite"))
+    values.setdefault("WORK_HARNESS_BLACKBOARD_PATH", str(paths.data / "blackboard.sqlite"))
     values.setdefault(
         "WORK_HARNESS_PROVIDER_STORE_PATH",
         str(paths.data / "providers.sqlite"),
+    )
+    values.setdefault(
+        "WORK_HARNESS_SETTINGS_PATH",
+        str(paths.data / "settings.json"),
     )
     values.setdefault(
         "WORK_HARNESS_EVALUATION_OUTPUT",

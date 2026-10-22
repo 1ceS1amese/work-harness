@@ -24,10 +24,11 @@ ENV PYTHONUNBUFFERED=1 \
     UV_LINK_MODE=copy \
     UV_PROJECT_ENVIRONMENT=/opt/work-harness-venv \
     PATH="/opt/work-harness-venv/bin:${PATH}" \
-    WORK_HARNESS_PROFILE=local \
+    WORK_HARNESS_PROFILE=setup \
     WORK_HARNESS_CHECKPOINT_PATH=/app/var/checkpoints.sqlite \
     WORK_HARNESS_RUN_STORE_PATH=/app/var/runs.sqlite \
-    WORK_HARNESS_PROVIDER_STORE_PATH=/app/var/providers.sqlite
+    WORK_HARNESS_PROVIDER_STORE_PATH=/app/var/providers.sqlite \
+    WORK_HARNESS_SETTINGS_PATH=/app/var/settings.json
 
 COPY --from=uv-bin /uv /uvx /usr/local/bin/
 
@@ -47,6 +48,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --no-dev --no-editable
 
 COPY scripts/backup_sqlite.py ./scripts/backup_sqlite.py
+COPY scripts/backup_postgres.py ./scripts/backup_postgres.py
 COPY --from=frontend-builder /build/frontend/dist/ ./frontend/dist/
 
 RUN useradd --uid 10001 --create-home --home-dir /home/work-harness \

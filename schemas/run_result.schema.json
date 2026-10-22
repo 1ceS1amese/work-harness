@@ -44,6 +44,84 @@
       "title": "AgentFunction",
       "type": "string"
     },
+    "AgentInteraction": {
+      "additionalProperties": false,
+      "description": "Public provenance for completed Agent exchanges; contains no private messages.",
+      "properties": {
+        "interaction_id": {
+          "title": "Interaction Id",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "assignment",
+            "dependency",
+            "repair",
+            "result",
+            "review"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "sender": {
+          "title": "Sender",
+          "type": "string"
+        },
+        "recipient": {
+          "title": "Recipient",
+          "type": "string"
+        },
+        "subtask_id": {
+          "title": "Subtask Id",
+          "type": "string"
+        },
+        "artifact_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Artifact Id"
+        },
+        "artifact_version": {
+          "minimum": 1,
+          "title": "Artifact Version",
+          "type": "integer"
+        },
+        "review_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Review Id"
+        },
+        "repair_round": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Repair Round",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "interaction_id",
+        "kind",
+        "sender",
+        "recipient",
+        "subtask_id",
+        "artifact_version"
+      ],
+      "title": "AgentInteraction",
+      "type": "object"
+    },
     "AllocationMode": {
       "enum": [
         "auto",
@@ -79,7 +157,7 @@
           "type": "integer"
         },
         "content": {
-          "maxLength": 50000,
+          "maxLength": 200000,
           "minLength": 1,
           "title": "Content",
           "type": "string"
@@ -288,6 +366,11 @@
           "title": "Cached Tokens",
           "type": "integer"
         },
+        "usage_complete": {
+          "default": true,
+          "title": "Usage Complete",
+          "type": "boolean"
+        },
         "estimated_cost_usd": {
           "default": 0,
           "minimum": 0,
@@ -332,6 +415,28 @@
         "model"
       ],
       "title": "ModelCallRecord",
+      "type": "object"
+    },
+    "ObjectRef": {
+      "additionalProperties": false,
+      "properties": {
+        "object_id": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Object Id",
+          "type": "string"
+        },
+        "revision": {
+          "minimum": 1,
+          "title": "Revision",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "object_id",
+        "revision"
+      ],
+      "title": "ObjectRef",
       "type": "object"
     },
     "Plan": {
@@ -662,14 +767,16 @@
           "title": "Acceptance Criteria",
           "type": "array"
         },
-        "token_budget": {
+        "max_output_tokens": {
           "default": 5000,
+          "description": "Maximum output tokens per model call.",
           "minimum": 1,
-          "title": "Token Budget",
+          "title": "Max Output Tokens",
           "type": "integer"
         },
         "cost_budget_usd": {
-          "default": 0.5,
+          "default": 0,
+          "deprecated": true,
           "minimum": 0,
           "title": "Cost Budget Usd",
           "type": "number"
@@ -837,6 +944,11 @@
           "title": "Cached Tokens",
           "type": "integer"
         },
+        "usage_complete": {
+          "default": true,
+          "title": "Usage Complete",
+          "type": "boolean"
+        },
         "estimated_cost_usd": {
           "default": 0,
           "minimum": 0,
@@ -850,6 +962,22 @@
   },
   "additionalProperties": false,
   "properties": {
+    "pending_intents": {
+      "items": {
+        "$ref": "#/$defs/ObjectRef"
+      },
+      "title": "Pending Intents",
+      "type": "array"
+    },
+    "engine": {
+      "default": "legacy",
+      "enum": [
+        "legacy",
+        "blackboard"
+      ],
+      "title": "Engine",
+      "type": "string"
+    },
     "run_id": {
       "title": "Run Id",
       "type": "string"
@@ -937,6 +1065,13 @@
         "$ref": "#/$defs/ToolCallRecord"
       },
       "title": "Tool Calls",
+      "type": "array"
+    },
+    "agent_interactions": {
+      "items": {
+        "$ref": "#/$defs/AgentInteraction"
+      },
+      "title": "Agent Interactions",
       "type": "array"
     }
   },

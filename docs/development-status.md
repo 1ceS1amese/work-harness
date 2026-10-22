@@ -1,14 +1,46 @@
 # Work Harness 当前开发进度与接续报告（框架完善后）
 
-> 报告日期：2026-08-19
-> 项目目录：`/home/s1amese/work-harness`  
-> 当前阶段：本地框架闭环、Provider 兼容合同、模块化 Skill、Windows 单文件封装、可配置的
-> 单实例生产部署与 GitHub 开源发布链已完成；真实模型验收、业务系统工具和多实例生产基础设施
-> 待接入
+> 更新日期：2026-10-22。当前进度以[黑板设计与实施计划](blackboard-design.md)为准。
+> Fact / Intent / Hint 黑板核心、动态协作、查询与人工输入、知识关系图、PostgreSQL 多 Worker
+> 已完成；真实模型对照、备份回退与 6.4 默认切换均已落地。新任务默认使用黑板，legacy 保留显式入口及回退；费用按用户要求不参与验收。
+> Token 记账已与额度控制分离：累计用量不拦截执行，输入/输出/缓存及未知用量独立记录。
+
+`gpt-5.6-sol` 通过 Responses 接口完成六项固定任务对照：黑板 6/6、旧引擎 1/6；总时延分别为
+111.672 秒和 344.207 秒。费用未知，但按最新计划不参与验收；原报告保留当时包含费用门槛的
+判定，6.4.1 已使用原始答案和调用记录生成独立重判报告，保留门槛全部通过，没有追加模型
+调用。这是一次有限任务集的对照，不代表开放研究或通用
+任务的全面质量验收。
+
+SQLite 和真实 PostgreSQL 16 的备份恢复、旧引擎接收新请求、原黑板任务继续恢复均通过；
+6.3 当时完整后端回归 751 项通过。本轮未复测 Docker 容器恢复和 Windows 打包运行。
+6.4 已按评估规则同步、默认入口切换、兼容与回退验证、文档同步的顺序完成。新任务必须明确
+提供验收条件；网页跟随默认设置，CLI/API 可省略引擎参数。显式 legacy、历史读取、原引擎
+恢复与回退入口继续可用。
+
+默认切换阶段的后端完整回归 784 项，首轮 783 项通过；修正一项故障注入测试的扫描竞争后，相关
+PostgreSQL、默认入口与历史兼容 24 项复测全部通过。前端 56 项、类型检查、生产构建、
+配置校验、Ruff 与差异检查通过。默认切换已验证 SQLite 和 PostgreSQL 16 API/Worker 源码
+运行模式；未据此宣称 Windows EXE 或容器发布产物已经重新验收。
+本次 Token 重构覆盖实际用量、缺失回执、失败重试、迟到对账、重启、并发及旧配置读取；
+完整后端首轮 798 项中 790 项通过，8 项旧断言/测试参数已修正，相关复测 93 项通过；随后
+补充的失败调用与重试测试通过（专项共 22 项）。前端 57 项、生产构建和静态检查通过。
+没有追加真实模型调用，历史评估报告未改写；旧运行恢复仍要求匹配原版本。
+
+以下 2026-10-21 及 2026-08-20 内容保留为历史基线，其中固定流水线描述对应兼容旧引擎。
+
+## 2026-10-21 核心架构更新
+
+核心工作流已重构为统一协调图与独立 Worker/Review Agent 子图。任务交接现在包含直接上游
+产物、上一版结果和审查反馈；返工会失效目标的所有下游任务，未变更成果及复核保持复用。
+新增调用内 Checkpoint、实际用量记录和工具步数控制，任务详情展示成员协作记录。设计、代码位置
+和旧版任务升级边界见[多 Agent 核心设计](multi-agent-design.md)。
+
+本轮通过 118 项常规后端测试、8 项独立 PostgreSQL 16 集成测试、21 项前端测试，以及静态
+检查、类型检查和前端生产构建。以下 2026-08-20 验证表保留为历史基线，不表示新拓扑的性能。
 
 ## 1. 结论摘要
 
-Work Harness 已经具备一套可运行、可测试、可持久化的多 Agent 编排框架：后端可接收任务并执行完整工作流，四个同构中文 Agent 可以进行任务分配、受限只读工具调用、风险自适应交叉审查、裁决、修复和汇总；所有启用 Provider 必须通过同一协议、相同能力集合和真实能力声明检查；任务能力可通过 Skill 模块化组合，并自动或手动路由到兼容 Provider。Provider 配置、逻辑模型映射及主协调组/逐子 Agent 路由可通过 SQLite Profile 保存；凭据可选择环境变量注入，或由设置页面提交并通过独立密钥加密保存。自定义模型方可选择 OpenAI 协议或 DeepSeek 方言，以及 Chat Completions/Responses 出站端点。后端现在具备完整运行与逐 Provider 背压、事件驱动 SSE、运行级幂等 Tool 缓存、生产 Trace 采样及存活/就绪分离。前端采用 Vue 3、TypeScript 和 Element Plus 实现灰白方框式类群聊交互，并以 SSE 优先、查询补偿的方式展示状态；运行状态、幂等索引、执行租约、Provider Profile 和浏览器会话均有持久化方案。
+Work Harness 已经具备一套可运行、可测试、可持久化的多 Agent 编排框架：后端可接收任务并执行完整工作流，四个同构中文 Agent 可以进行任务分配、受限只读工具调用、风险自适应交叉审查、裁决、修复和汇总；所有启用 Provider 必须通过同一协议、相同能力集合和真实能力声明检查；任务能力可通过 Skill 模块化组合，并自动或手动路由到兼容 Provider。Provider 配置、逻辑模型映射及主协调组/逐子 Agent 路由可在内嵌模式通过 SQLite Profile 保存；凭据可选择环境变量注入，或由设置页面提交并通过独立密钥加密保存。自定义模型方可选择 OpenAI 协议或 DeepSeek 方言，以及 Chat Completions/Responses 出站端点。后端现在具备完整运行与逐 Provider 背压、事件驱动 SSE、运行级幂等 Tool 缓存、生产 Trace 采样及存活/就绪分离。新增的分布式 Profile 将 API 与 Worker 分离，使用 PostgreSQL 原子保存 Run/Job、共享 LangGraph Checkpoint，并实现全局接纳、`SKIP LOCKED`、租约 fencing、有界重试、死信重放、跨实例通知和 Worker 配置一致性检查。前端采用 Vue 3、TypeScript 和 Element Plus 实现灰白方框式类群聊交互，并以 SSE 优先、查询补偿的方式展示状态。
 
 当前可以用于：
 
@@ -18,6 +50,7 @@ Work Harness 已经具备一套可运行、可测试、可持久化的多 Agent 
 - Mock 模型下的回归测试和评估流程验证；
 - 在虚拟机中继续开发。
 - 以 GitHub Issue/PR 协作，并通过 GitHub Release 与 GHCR 发布版本化产物。
+- 以一个 API 和多个 Worker 验证长任务的多实例领取、接管、取消和恢复。
 
 当前还不能直接视为生产系统。以下能力尚未完成真实接入：
 
@@ -25,10 +58,11 @@ Work Harness 已经具备一套可运行、可测试、可持久化的多 Agent 
 - 实际业务工具及其权限边界；
 - 基于真实任务集的质量评估；
 - 服务端会话历史和多端同步；
-- 多实例共享数据库、可靠任务队列和跨实例故障恢复；
 - 完整的身份认证、租户隔离、限流和审计。
+- 分布式 Provider/Prompt/Settings 的共享可编辑存储与持久事件回放；
+- 目标环境下真实 PostgreSQL、真实 Provider 和预期 Worker 规模的容量压测。
 
-因此，当前最准确的进度判断是：**工程框架及单实例本地闭环完成并加固，外部服务与生产接入尚未完成。**
+因此，当前最准确的进度判断是：**工程闭环、单实例部署和多实例可靠调度核心已经完成；真实模型质量、多用户安全边界和业务接入仍未验收。**
 
 ## 2. 已确认的产品与架构约束
 
@@ -51,7 +85,10 @@ flowchart LR
     UI[Vue 3 群聊式前端] --> API[FastAPI API]
     API --> RM[RunManager]
     RM --> RS[RunStore<br/>运行索引与幂等]
-    RM --> WF[LangGraph 工作流]
+    RM -->|embedded| WF[LangGraph 工作流]
+    RM -->|api role 提交| PQ[(PostgreSQL<br/>Reliable Queue)]
+    PQ -->|SKIP LOCKED| WR[Worker 实例]
+    WR --> WF
     WF --> CP[Checkpoint<br/>完整 Graph State]
     WF --> MM[Model Router / Provider]
     WF --> SK[Skill Registry<br/>能力与 Provider 路由]
@@ -77,15 +114,15 @@ Normalize
 
 | 模块 | 位置 | 当前职责 |
 | --- | --- | --- |
-| API | `src/work_harness/api/app.py` | 健康检查、能力查询、创建/查询/恢复/取消运行 |
-| 运行服务 | `src/work_harness/service.py` | `RunManager`，统一管理运行生命周期 |
+| API | `src/work_harness/api/app.py` | 健康检查、能力查询、创建/查询/恢复/取消运行、死信管理 |
+| 运行服务 | `src/work_harness/service.py` | `RunManager`，管理 embedded/API/Worker 生命周期 |
 | 工作流 | `src/work_harness/workflow/` | Graph 构建、节点执行、状态迁移和终止控制 |
 | 节点实现 | `src/work_harness/workflow/nodes.py` | `WorkflowNodes`，实现规划、执行、审查、裁决、修复与汇总 |
 | 数据契约 | `src/work_harness/domain/` | 请求、任务、Skill 选择、工件、审查、裁决和最终结果等结构化模型 |
 | 模型层 | `src/work_harness/llm/` | Provider 接口、Adapter 注册、兼容报告和逻辑模型路由 |
 | Skill 层 | `src/work_harness/skills/`、`skills/` | Skill 加载、静态兼容检查、组合和 Provider/Tool 路由 |
 | 工具层 | `src/work_harness/tools/` | Tool Registry、Gateway、权限、超时和审批边界 |
-| 运行存储 | `src/work_harness/storage/` | `RunStore` 接口及 Memory/SQLite 实现 |
+| 运行存储 | `src/work_harness/storage/` | `RunStore/ReliableRunStore` 及 Memory/SQLite/PostgreSQL 实现 |
 | 配置 | `src/work_harness/config/`、`config/` | 类型化配置、运行限制、模型、Agent 和工具配置 |
 | 评估 | `src/work_harness/evaluation/`、`evaluation/` | 评估用例、批量运行、指标和报告 |
 | 前端 | `frontend/src/` | 群聊 UI、会话管理、API 访问、运行详情和本地持久化 |
@@ -106,19 +143,20 @@ Normalize
 | Provider Profile 持久化 | 已完成 | YAML 默认值叠加 Memory/SQLite；支持 main/逐 worker 路由、环境变量凭据与页面加密凭据，API 不回显 Key |
 | 模块化 Skill | 已完成 | 标准 `SKILL.md` 加机器清单，支持能力/工具校验、组合、首选和手动 Provider 路由 |
 | 工具注册与网关 | 已完成只读闭环 | 已打通模型 tool call；除 `echo_read` 外新增受限 `workspace_read` |
-| Graph Checkpoint | 已完成 | 支持 Memory/SQLite，默认 SQLite |
-| RunStore | 已完成 | 支持 Memory/SQLite，默认 SQLite，保存运行索引、状态与幂等信息 |
+| Graph Checkpoint | 已完成 | 支持 Memory/SQLite/PostgreSQL，默认 SQLite；分布式强制 PostgreSQL |
+| RunStore | 已完成 | Memory/SQLite 保存内嵌索引；PostgreSQL 另提供可靠共享 Run/Job 队列 |
 | 浏览器会话持久化 | 已完成 | `localStorage` 保存会话；仅限当前浏览器 |
 | 服务端会话同步 | 未完成 | 尚无账号级会话仓储和多端同步 |
 | Vue 群聊式前端 | 已完成 | 灰白方框式三栏群聊、左右消息、群成员栏、中文口语化功能选择、Skill/Provider 选择、状态流、恢复/取消、详情和会话本地保存 |
-| 异常运行恢复 | 已完成单实例闭环 | RunStore 租约、心跳、启动扫描；只从已有 Checkpoint 续跑 |
-| 实时流式推送 | 已完成状态流 | LangGraph 节点更新主动通知 SSE，空闲连接仅 keepalive；前端断线后查询补偿 |
-| 自动化测试 | 已完成扩展集 | 后端 71 项、前端 15 项通过 |
+| 异常运行恢复 | 已完成单/多实例闭环 | embedded 启动扫描；分布式租约接管并从共享 Checkpoint 续跑 |
+| 实时流式推送 | 已完成状态流 | 节点更新通知 SSE；分布式用 LISTEN/NOTIFY 唤醒并周期读取校准 |
+| 自动化测试 | 已完成扩展集 | 后端 126 项、前端 21 项通过；包含 8 项真实 PostgreSQL 集成测试 |
 | 评估框架 | 已完成扩展集 | 10 个 Mock 契约用例通过，不代表真实任务质量 |
 | 身份、租户、限流 | 部分完成 | 请求体上限和进程内客户端令牌桶已启用；仍无用户身份、租户隔离与分布式限流 |
-| 多实例与任务队列 | 未完成 | 当前 SQLite/进程内并发适合单实例开发环境 |
-| Docker Compose 单实例部署 | 已实现，待目标机实构建 | 生产模板/校验、非 root/只读运行、资源限制、存活/就绪检查、含凭据密钥的在线备份、日志轮转及 Caddy HTTPS/安全响应头 |
-| Windows 单文件封装 | 已完成 | PyInstaller one-file EXE 内置后端、前端和运行资源；可写 SQLite 位于 `%LOCALAPPDATA%`，双击启动并自动打开浏览器 |
+| 多实例与任务队列 | 核心已完成 | PostgreSQL 原子提交、全局容量、SKIP LOCKED、fencing、重试/死信、取消/恢复、Worker 心跳和 Graph revision |
+| Docker Compose 单实例部署 | 已完成实构建 | Docker Desktop 4.58 实际构建并启动；非 root/只读运行、首页、OpenAPI、存活检查及未配置 Provider 的任务阻断通过 |
+| Docker Compose 分布式部署 | 已完成实构建 | PostgreSQL 17、schema 3 migrate、API、2 个 Worker、共享队列、认证、健康检查和配置一致性均完成容器实测 |
+| Windows 单文件封装 | 已完成 | PyInstaller one-file GUI EXE 内置后端、前端和运行资源；双击后以原生 WebView2 窗口运行，不显示控制台或外部浏览器，关闭窗口同步停止服务 |
 | GitHub 开源发布链 | 已完成 | Standard Readme 中英文入口、MIT、社区治理文件、Issue/PR 模板、Dependabot、CI、Release wheel/sdist/Windows EXE、双架构 GHCR 与构建来源证明 |
 | Git 版本基线 | 已完成 | `main` 分支已有可回滚基线提交，本轮兼容性改造可独立审查 |
 
@@ -154,6 +192,8 @@ Planner 当前可为子任务提供：
 | 配置项 | 当前值 | 用途 |
 | --- | ---: | --- |
 | `run_max_concurrency` | 4 | 同时执行的完整 Graph Run 上限 |
+| `run_queue_capacity` | 8 | 可在进程内等待执行的完整 Run 上限；队列满后返回 429 |
+| `run_queue_retry_after_seconds` | 5 | 队列满时通过 `Retry-After` 建议客户端等待的秒数 |
 | `worker_max_concurrency` | 4 | Worker 最大并发数 |
 | `reviewer_max_concurrency` | 3 | Reviewer 最大并发数 |
 | `review_strategy` | `adaptive` | 低风险综合审查，高风险三维审查 |
@@ -163,8 +203,7 @@ Planner 当前可为子任务提供：
 | `max_node_steps` | 10 | 节点步数限制 |
 | `node_timeout_seconds` | 60 | 单节点超时 |
 | `run_timeout_seconds` | 300 | 单次运行总超时 |
-| `token_budget` | 50000 | Token 预算 |
-| `cost_budget_usd` | 5.0 | 成本预算（美元） |
+| `agents.*.max_output_tokens` | 各角色配置 | 单次输出长度；累计 Token 与金额不设额度 |
 | `max_artifact_chars` | 20000 | 工件最大字符数 |
 | `max_tool_result_chars` | 8000 | 工具结果最大字符数 |
 | `tool_cache_max_entries` | 256 | 运行级幂等工具缓存上限 |
@@ -178,20 +217,23 @@ Planner 当前可为子任务提供：
 
 ## 6. 持久化设计与当前边界
 
-系统目前有四个不同职责的持久化层：
+系统目前有六个不同职责的持久化层：
 
 | 层 | 默认位置 | 保存内容 | 当前定位 |
 | --- | --- | --- | --- |
 | Checkpoint | `var/checkpoints.sqlite` | 完整 Graph State、节点进度、恢复所需状态 | 运行状态的事实来源 |
 | RunStore | `var/runs.sqlite` | 运行索引、状态、请求指纹、幂等哈希、租约与尝试次数 | 快速查询、幂等和唯一执行权 |
+| Reliable Queue | PostgreSQL `work_harness_run_jobs` | 经校验任务 payload、Graph revision、租约 token、尝试与死信 | 多实例可恢复调度的事实来源 |
 | ProviderProfileStore | `var/providers.sqlite` + `.key` | Adapter、协议变体、端点、凭据通道、可选 Key 密文、模型白名单、逻辑映射与逐 Agent 路由 | 配置与页面凭据重启恢复，API 不回显 Key |
+| ApplicationSettingsStore | `var/settings.json` | Prompt 覆盖和受控运行参数 | 内嵌模式页面配置 |
 | ConversationStorage | 浏览器 `localStorage` | 会话列表、消息、最近运行信息 | 单浏览器交互体验 |
 
-后端存储通过接口封装，可在配置中选择 Memory 或 SQLite：
+后端存储通过接口封装，可在配置中选择 Memory、SQLite 或 PostgreSQL：
 
 - `src/work_harness/storage/base.py`：`RunStore` 协议；
 - `src/work_harness/storage/memory.py`：内存实现；
 - `src/work_harness/storage/sqlite.py`：SQLite 实现；
+- `src/work_harness/storage/queue.py`、`postgres.py`：可靠队列合同与 PostgreSQL 实现；
 - `src/work_harness/storage/provider_base.py`：`ProviderProfileStore` 协议；
 - `src/work_harness/storage/provider_memory.py`、`provider_sqlite.py`：Provider Profile 实现；
 - `src/work_harness/config/models.py`：存储配置模型。
@@ -201,9 +243,10 @@ SQLite 实现已经包含 WAL、busy timeout、参数绑定、进程内异步写
 当前已知边界：
 
 1. 启动扫描会认领租约为空或过期的未完成运行；有 Checkpoint 时续跑，没有 Checkpoint 时安全标记失败。
-2. 当前没有生产任务队列或死信队列；租约方案定位为单实例故障恢复和未来共享 Store 的合同基线。
-3. SQLite 适合当前单机/单实例开发；不适合未经改造直接承担多副本并发写入。
-4. 浏览器会话没有服务端备份，清除浏览器数据会丢失本地会话列表。
+2. 分布式队列承诺 at-least-once，不承诺外部 Tool 副作用 exactly-once；写工具必须自行幂等。
+3. SQLite 仍只适合单机/单实例；多实例必须同时使用 PostgreSQL RunStore 和 Checkpoint。
+4. 分布式 Provider/Prompt/Settings 当前通过统一环境配置冻结，页面写接口返回 409。
+5. 浏览器会话没有服务端备份，清除浏览器数据会丢失本地会话列表。
 
 更完整说明见 `docs/persistence.md`。
 
@@ -221,6 +264,12 @@ SQLite 实现已经包含 WAL、busy timeout、参数绑定、进程内异步写
 | GET | `/v1/providers` | 查询 YAML 与持久化 Provider Profile、装载和凭据就绪状态 |
 | PUT | `/v1/providers/{name}` | 校验并持久化 Provider Profile，重启后装载 |
 | DELETE | `/v1/providers/{name}` | 删除持久化覆盖，重启后回退 YAML |
+| GET | `/v1/settings` | 查询 Agent Prompt 与允许页面修改的运行配置 |
+| PUT | `/v1/settings/prompts/{name}` | 持久化指定工作阶段的 Prompt 覆盖 |
+| DELETE | `/v1/settings/prompts/{name}` | 删除 Prompt 覆盖并恢复内置版本 |
+| PUT | `/v1/settings/runtime` | 校验并持久化并发、复核、输出长度和超时策略 |
+| GET | `/v1/queue/dead` | 分页查询分布式死信，不返回原始 payload |
+| POST | `/v1/queue/dead/{job_id}/replay` | 使用当前 Graph revision 创建重放 Job |
 | POST | `/v1/runs` | 创建一次运行 |
 | GET | `/v1/runs` | 分页列出运行 |
 | GET | `/v1/runs/{run_id}` | 查询运行详情和结果 |
@@ -247,7 +296,10 @@ SQLite 实现已经包含 WAL、busy timeout、参数绑定、进程内异步写
 | `frontend/src/components/MessageBubble.vue` | 用户、系统和 Agent 消息展示 |
 | `frontend/src/components/ComposerBox.vue` | 任务输入与发送 |
 | `frontend/src/components/RunDetailsDrawer.vue` | 运行详情、步骤和状态查看 |
-| `frontend/src/components/ProviderSettingsDrawer.vue` | Provider Profile、协议类型、模型映射和逐 Agent 路由管理 |
+| `frontend/src/components/SettingsPage.vue` | `/settings` 独立设置路由和分类导航 |
+| `frontend/src/components/ProviderSettingsPanel.vue` | Provider Profile、协议类型、模型映射和逐 Agent 路由管理 |
+| `frontend/src/components/PromptSettingsPanel.vue` | 六个工作阶段的 Prompt 查看、编辑和恢复 |
+| `frontend/src/components/RuntimeSettingsPanel.vue` | 并发、复核、输出长度和超时等受控运行配置 |
 | `frontend/src/composables/useConversations.ts` | 会话状态和交互逻辑 |
 | `frontend/src/services/conversationStorage.ts` | 浏览器本地持久化封装 |
 | `frontend/src/services/api.ts` | 后端 API 封装 |
@@ -265,6 +317,8 @@ SQLite 实现已经包含 WAL、busy timeout、参数绑定、进程内异步写
 - 为每个会话选择一个或多个 Skill，并自动选择或手动固定可用 Provider；
 - 在界面中暂存或启用自定义 Provider，选择环境变量或页面加密凭据，编辑主协调组/逐子 Agent
   模型路由，并查看待重启和就绪状态；
+- 通过独立 `/settings` 路由编辑模型、Agent 提示词和经过边界限制的运行配置，所有修改持久化到
+  发布包外并在重启后生效；
 - SSE 实时更新，断线后自动回退到查询轮询。
 
 后续前端重点是服务端会话同步、身份隔离、真实写工具审批和生产错误提示。
@@ -273,7 +327,7 @@ SQLite 实现已经包含 WAL、busy timeout、参数绑定、进程内异步写
 
 ### 9.1 模型
 
-模型层的接口和路由框架已经完成，默认使用两个能力完全相同的 Mock Provider 验证 Provider 选择。所有启用 Provider 需要通过协议 `1.0`、基线能力、能力集合全等和配置/运行时声明一致检查。`openai_compatible` 表示协议 Adapter，而非 OpenAI 官方服务；自定义 Profile 可选择 `openai` 协议或 `deepseek` 方言，以及 `/v1/chat/completions`、`/v1/responses` 端点。`agent_bindings.main` 绑定所有主协调节点，具体 `worker-*` 可各自覆盖 Provider/模型。当前已覆盖消息、结构化输出、Token 参数、Tool Call 多轮状态、Usage、逐 Agent 路由和错误映射的 Mock 合同测试，但仍未配置真实凭据和模型，也没有真实任务质量基线。
+模型层的接口和路由框架已经完成。默认 `setup` Profile 禁用 Mock 并等待用户从页面或部署环境配置真实兼容 Provider；未就绪时前端和 `POST /v1/runs` 都会阻止任务。两个能力相同的 Mock Provider 只在显式 `local` 开发 Profile、自动化测试和基准中验证 Provider 选择。所有启用 Provider 需要通过协议 `1.0`、基线能力、能力集合全等和配置/运行时声明一致检查。`openai_compatible` 表示协议 Adapter，而非 OpenAI 官方服务；自定义 Profile 可选择 `openai` 协议或 `deepseek` 方言，以及 `/v1/chat/completions`、`/v1/responses` 端点。设置页使用中文用户名称展示这些选项，并可用一个默认工作模型自动完成所有阶段映射；主协调组和具体子 Agent 仍可在高级设置中单独覆盖。当前已覆盖消息、结构化输出、Token 参数、Tool Call 多轮状态、Usage、逐 Agent 路由和错误映射的 Mock 合同测试，但仓库仍不包含真实凭据和真实任务质量基线。
 
 当前逻辑模型角色包括：
 
@@ -301,9 +355,11 @@ Tool Handler 也改为由 `ToolAdapterRegistry` 组装，外部包可使用 `wor
 
 ### 9.4 Prompt
 
-Prompt 应继续通过集中配置或注册机制管理，并记录版本。任何真实模型调优都应与评估集绑定，不能只依据少量手工对话判断质量提升。
+Prompt 由集中注册表管理并记录内置版本。设置页可为需求整理、规划、共享 Worker、复核、裁决和
+汇总阶段保存独立覆盖，不修改发布包中的 Markdown；运行时在重启时装载持久化版本。任何真实模型
+调优仍应与评估集绑定，不能只依据少量手工对话判断质量提升。
 
-## 10. 2026-08-19 验证基线
+## 10. 2026-08-20 验证基线
 
 本报告生成前完成了下列验证：
 
@@ -312,17 +368,18 @@ Prompt 应继续通过集中配置或注册机制管理，并记录版本。任�
 | 配置检查 | `uv run work-harness check-config` | 通过；本地配置、Agent、模型角色、工具和 SQLite 存储加载正常 |
 | Python 静态检查 | `uv run ruff check src tests scripts` | 通过，无检查错误 |
 | Provider/Skill 兼容检查 | `uv run work-harness check-compatibility` | 通过；2 个启用 Provider 等能力，2 个运行时 Skill 均有可用 Provider |
-| 后端测试 | `uv run pytest` | 71 项通过，包含双凭据通道、密文持久化、生产待配置启动和 readiness 覆盖 |
+| 后端测试 | `WORK_HARNESS_TEST_DATABASE_URL=... uv run pytest` | 116 项通过，包含桌面/设置、背压、恢复、双凭据、可靠队列状态机、跨进程指纹和真实 PostgreSQL 契约 |
+| PostgreSQL 集成 | `uv run pytest -q tests/test_postgres_queue.py` | 8 项通过：原子回滚、50 路幂等/容量、100 Job 双 Store 领取、租约/fencing/死信、通知重连、迁移及 API+双 Worker 完整 Graph/人工恢复 |
 | 后端 Mock 基准 | `uv run python scripts/benchmark_backend.py --runs 50 --concurrency 4` | 50/50 成功；84.24 runs/s；p50/p95/p99 为 45.03/65.62/76.15 ms；平均 7 次模型调用；仅代表当前机器的框架开销 |
 | 单文件封装 | `pyinstaller packaging/work-harness.spec` | Linux 同构 one-file 构建用于本地验证；Windows x64 正式构建由 GitHub Actions 原生 Windows runner 完成 |
 | 基础评估 | `uv run work-harness eval` | 10/10 契约检查通过，错误率 0，平均模型调用由 10.8 降至 8.8；不代表真实质量 |
 | 前端类型检查 | `npm run type-check` | 通过 |
-| 前端测试 | `npm run test -- --run` | 5 个测试文件、15 项测试全部通过，包含中文标签、Provider Key 单向提交、API Key 请求头与鉴权 SSE |
-| 前端生产构建 | `npm run build` | 通过；主 CSS/JS 约 143.47/459.77 kB，Provider 管理按需加载约 11.61/52.17 kB |
+| 前端测试 | `npm run test -- --run` | 7 个测试文件、21 项测试全部通过，包含独立设置导航、配置 API、中文标签、Provider Key 单向提交、鉴权 SSE 与损坏会话恢复 |
+| 前端生产构建 | `npm run build` | 通过；聊天主包约 464.08 kB，独立设置路由按需加载约 70.05 kB |
 | 开源发布自检 | `python scripts/check_release.py` | 通过；README 顺序、描述、版本、License、本地链接和社区文件一致 |
 | GitHub Actions 校验 | `actionlint` | 通过；CI 与 Release 工作流语法、表达式和依赖关系有效 |
 | Python 发布产物 | `python -m build`、`twine check`、`scripts/verify_wheel.py` | sdist 与 wheel 构建及元数据检查通过；wheel 在全新虚拟环境、源码目录外可加载包内配置并执行 CLI |
-| Compose 静态检查 | `docker compose --profile public config --quiet` | 文件此前通过静态校验；本轮 WSL 未启用 Docker Desktop 集成，镜像实构建交由 GitHub CI 和目标机执行 |
+| Compose 与容器实测 | embedded 与 `compose.distributed.yaml` | Docker Desktop 4.58 完成镜像构建；单实例健康，分布式 PostgreSQL/migrate/API/双 Worker 健康且总 Worker 容量为 8 |
 | SQLite 备份检查 | `python scripts/backup_sqlite.py var <临时目录>` | 通过；三个数据库快照与 manifest SHA-256 一致 |
 
 基础评估当前只验证 Mock 工作流能否稳定闭环：
@@ -373,19 +430,21 @@ quality_claim: false
 **建议：** 新增 `ConversationRepository` 接口、会话/消息表和分页 API，再让前端本地存储退化为缓存。  
 **风险：** 需要同时设计身份、租户、数据保留和删除策略。
 
-### P1（已完成单实例闭环）：异常退出自动恢复
+### P1（已完成核心闭环）：异常退出自动恢复
 
-**位置：** `RunStore`、启动流程和未来任务队列。  
-**现状：** 已增加 Memory/SQLite 租约、心跳、启动扫描和可重入恢复；恢复前检查 Checkpoint，孤立索引安全失败。  
-**剩余：** 生产多实例仍需共享 Store、可靠队列、死信和故障注入验证。  
-**风险：** 恢复机制仍必须依赖原子幂等和唯一执行权，避免重复运行。
+**位置：** `RunStore`、可靠队列和 Worker 生命周期。
+**现状：** embedded 具备 Memory/SQLite 租约、心跳和启动扫描；distributed 使用共享 PostgreSQL
+Job、Checkpoint、租约 fencing、有界重试和死信重放，并已通过真实数据库并发/故障测试。
+**剩余：** 目标环境还需进程强杀、数据库短暂不可用、滚动升级和长时间 soak 测试。
+**风险：** at-least-once 无法撤销已经发出的外部副作用，所有写 Tool 仍必须幂等。
 
-### P1：单实例存储不适合直接横向扩展
+### P1（已提供独立方案）：单实例存储不适合直接横向扩展
 
 **位置：** SQLite Checkpoint 与 SQLite RunStore。  
-**影响：** 多副本部署会遇到共享文件、锁竞争和任务归属问题。  
-**建议：** 生产阶段实现 PostgreSQL 版 Store/Checkpoint，并引入可靠任务队列或调度租约。  
-**风险：** 数据迁移和状态恢复语义必须先通过集成测试。
+**现状：** SQLite 合同保持单实例；`distributed` Profile 已实现 PostgreSQL RunStore/Checkpoint、
+API/Worker 分离和 Compose Worker 扩缩，禁止把 SQLite 卷用于多副本。
+**剩余：** Provider/Settings 共享持久化、组织身份、分布式限流、持久事件回放和生产容量标定。
+**风险：** 不兼容 Graph revision 必须先排空旧 Job 或显式迁移，不能由新 Worker 猜测执行。
 
 ### P2（已完成状态流）：流式事件通道
 
@@ -396,8 +455,10 @@ quality_claim: false
 ### P2：生产可观测性与端到端测试不足
 
 **位置：** Trace、API、前端和部署层。  
-**影响：** 当前测试能覆盖框架基础行为，但对真实模型、数据库迁移、浏览器交互和故障恢复的覆盖不足。  
-**建议：** 增加真实 Provider 契约测试、SQLite/PostgreSQL 集成测试、浏览器 E2E、故障注入和 OpenTelemetry 指标。
+**影响：** 当前测试已覆盖 PostgreSQL 事务、并发、迁移和租约恢复，但仍缺真实模型、浏览器 E2E、
+目标机故障注入、长期压力和 OpenTelemetry 指标。
+**建议：** 使用手动凭据增加真实 Provider 契约/质量测试，在目标部署环境记录队列 p95、连接池、
+Worker 崩溃恢复时间和资源曲线，并补浏览器 E2E。
 
 ## 12. 推荐的接续开发顺序
 
@@ -411,7 +472,8 @@ quality_claim: false
 4. 运行配置检查、后端测试、前端测试和构建。
 5. 初始化 Git，提交当前基线。
 
-完成标准：后端 71 项测试和前端 15 项测试通过，10/10 Mock 契约评估通过，生产构建成功，Git 工作区干净。
+完成标准：后端 116 项测试和前端 21 项测试通过，真实 PostgreSQL 契约组不跳过，10/10 Mock
+契约评估通过，生产构建成功，Git 工作区干净。
 
 ### 阶段 1：接入一个真实模型并建立质量基线
 
@@ -446,9 +508,10 @@ quality_claim: false
 
 ### 阶段 4：生产加固
 
-目标：支持真实多用户和多实例运行。
+目标：在已完成多实例调度核心上支持真实多用户生产运行。
 
-重点包括：PostgreSQL、可靠任务队列、身份认证、租户隔离、限流、敏感信息脱敏、备份恢复、持久事件回放、OpenTelemetry 和部署健康检查。
+重点包括：组织身份、租户隔离、分布式限流、共享 Provider/Settings 仓储、敏感信息脱敏、数据库
+角色拆分与时间点恢复、持久事件回放、OpenTelemetry、目标环境压力测试和业务 Tool 审计。
 
 ## 13. 建议的首批开发任务（1–2 个工作日）
 
@@ -460,7 +523,8 @@ quality_claim: false
 4. 完成首次真实模型评估，输出独立 baseline 报告和 bad case。
 5. 根据 bad case 只修复最明确的 P1 问题，不立即大规模改工作流。
 
-这一轮暂不建议同时修改前端布局、引入 PostgreSQL或开放写工具，否则难以确认质量变化来自哪一项改动。
+下一轮不应再同时重做前端布局或直接开放写工具；优先使用现有 PostgreSQL 队列接入一个真实
+Provider，形成可重复质量/容量基线后再扩展外部副作用。
 
 ## 14. 本地与虚拟机运行方式
 
@@ -574,4 +638,5 @@ SHA-256: b23083d95af2859fd445ef3c26ea04bac8ee30ddad021636523c2fa7a8f78b57
 - Mock 单元测试、前后端现有测试与生产构建继续通过；
 - 所有改动在 Git 中可审查、可回滚。
 
-完成这个里程碑后，再进入服务端会话、多用户和多实例生产化，会比继续扩展 UI 或一次性重写工作流更容易验证和控制风险。
+完成这个里程碑后，应在现有多实例调度核心上继续服务端会话、多用户身份和共享配置生产化，
+不需要再次重写队列或工作流。

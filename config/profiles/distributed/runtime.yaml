@@ -1,0 +1,14 @@
+trace:
+  sample_rate: 0.1
+execution:
+  role: api
+checkpoint:
+  backend: postgres
+  dsn_env: WORK_HARNESS_DATABASE_URL
+run_store:
+  backend: postgres
+  dsn_env: WORK_HARNESS_DATABASE_URL
+  pool_min_size: 1
+  pool_max_size: 10
+provider_store:
+  backend: memory

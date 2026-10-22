@@ -1,79 +1,31 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
-import json
-import shutil
-import sqlite3
-from datetime import UTC, datetime
 from pathlib import Path
 
-DATABASES = ("checkpoints.sqlite", "runs.sqlite", "providers.sqlite")
-PROVIDER_KEY = "providers.sqlite.key"
-
-
-def file_sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as stream:
-        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
-def backup_database(source: Path, destination: Path) -> None:
-    with sqlite3.connect(source) as source_connection:
-        with sqlite3.connect(destination) as destination_connection:
-            source_connection.backup(destination_connection)
+from work_harness.storage.backup import create_sqlite_backup, restore_sqlite_backup
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Create consistent Work Harness SQLite backups")
+    parser = argparse.ArgumentParser(description="Back up a stopped Work Harness SQLite deployment")
     parser.add_argument("source", type=Path)
     parser.add_argument("destination", type=Path)
-    args = parser.parse_args()
-
-    source_dir = args.source.resolve()
-    destination_dir = args.destination.resolve()
-    missing = [name for name in DATABASES if not (source_dir / name).is_file()]
-    if missing:
-        raise SystemExit(f"missing Work Harness databases in {source_dir}: {', '.join(missing)}")
-    destination_dir.mkdir(parents=True, exist_ok=False)
-
-    files: list[dict[str, object]] = []
-    for name in DATABASES:
-        source = source_dir / name
-        destination = destination_dir / name
-        backup_database(source, destination)
-        files.append(
-            {
-                "name": name,
-                "size": destination.stat().st_size,
-                "sha256": file_sha256(destination),
-            }
-        )
-
-    provider_key = source_dir / PROVIDER_KEY
-    if provider_key.is_file():
-        key_destination = destination_dir / PROVIDER_KEY
-        shutil.copyfile(provider_key, key_destination)
-        key_destination.chmod(0o600)
-        files.append(
-            {
-                "name": PROVIDER_KEY,
-                "size": key_destination.stat().st_size,
-                "sha256": file_sha256(key_destination),
-            }
-        )
-
-    manifest = {
-        "created_at": datetime.now(UTC).isoformat(),
-        "files": files,
-    }
-    (destination_dir / "manifest.json").write_text(
-        json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
+    parser.add_argument("--project-root", type=Path, default=Path(__file__).resolve().parents[1])
+    parser.add_argument(
+        "--restore", action="store_true", help="restore a bundle into a NEW directory"
     )
-    print(destination_dir)
+    parser.add_argument("--deployment-root", type=Path)
+    args = parser.parse_args()
+    if args.restore:
+        result = restore_sqlite_backup(args.source, args.destination)
+    else:
+        result = create_sqlite_backup(
+            args.source,
+            args.destination,
+            project_root=args.project_root,
+            deployment_root=args.deployment_root,
+        )
+    print(result)
     return 0
 
 

@@ -3,17 +3,23 @@ from __future__ import annotations
 from typing import Any
 
 from langgraph.graph import END, START, StateGraph
-from langgraph.types import Send
 
-from work_harness.config.models import AppConfig, RuntimeConfig
-from work_harness.domain.enums import DecisionAction, RiskLevel, RunStatus
+from work_harness.config.models import AppConfig
 from work_harness.llm.gateway import ModelGateway
 from work_harness.observability.trace import TraceRecorder
 from work_harness.prompts import PromptRegistry
 from work_harness.skills import SkillRegistry
 from work_harness.tools.gateway import ToolGateway
+from work_harness.workflow.agents import ReviewAgent, WorkerAgent
 from work_harness.workflow.nodes import WorkflowNodes
-from work_harness.workflow.state import GraphState, latest_artifacts
+from work_harness.workflow.routing import (
+    _dispatch_after_schedule,
+    _dispatch_reviewers,
+    _dispatch_workers,
+    _route_after_human,
+    _route_decision,
+)
+from work_harness.workflow.state import GraphState
 
 
 def build_root_graph(
@@ -37,10 +43,10 @@ def build_root_graph(
     builder = StateGraph(GraphState)
     builder.add_node("normalize", nodes.normalize)
     builder.add_node("plan", nodes.plan)
-    builder.add_node("worker", nodes.worker)
+    builder.add_node("worker", WorkerAgent(nodes).build())
     builder.add_node("schedule", nodes.schedule)
     builder.add_node("validate", nodes.validate)
-    builder.add_node("reviewer", nodes.reviewer)
+    builder.add_node("reviewer", ReviewAgent(nodes).build())
     builder.add_node("judge", nodes.judge)
     builder.add_node("repair_plan", nodes.repair_plan)
     builder.add_node("human_gate", nodes.human_gate)
@@ -49,12 +55,15 @@ def build_root_graph(
 
     builder.add_edge(START, "normalize")
     builder.add_edge("normalize", "plan")
-    builder.add_conditional_edges("plan", _dispatch_workers)
+    builder.add_conditional_edges("plan", _dispatch_workers, ["worker", "validate", "fail"])
     builder.add_edge("worker", "schedule")
-    builder.add_conditional_edges("schedule", _dispatch_after_schedule)
+    builder.add_conditional_edges(
+        "schedule", _dispatch_after_schedule, ["worker", "validate", "fail"],
+    )
     builder.add_conditional_edges(
         "validate",
         lambda state: _dispatch_reviewers(state, config.runtime),
+        ["reviewer", "judge"],
     )
     builder.add_edge("reviewer", "judge")
     builder.add_conditional_edges(
@@ -67,7 +76,7 @@ def build_root_graph(
             "fail": "fail",
         },
     )
-    builder.add_conditional_edges("repair_plan", _dispatch_workers)
+    builder.add_conditional_edges("repair_plan", _dispatch_workers, ["worker", "validate", "fail"])
     builder.add_conditional_edges(
         "human_gate",
         _route_after_human,
@@ -76,100 +85,3 @@ def build_root_graph(
     builder.add_edge("synthesize", END)
     builder.add_edge("fail", END)
     return builder.compile(checkpointer=checkpointer)
-
-
-def _dispatch_workers(state: GraphState) -> list[Send] | str:
-    pending = state.get("pending_subtasks", [])
-    if not pending:
-        return "validate"
-    latest = {item["subtask_id"]: item for item in latest_artifacts(state.get("artifacts", []))}
-    completed = {
-        subtask_id
-        for subtask_id, artifact in latest.items()
-        if artifact.get("status") == "success"
-    }
-    ready = [item for item in pending if set(item.get("dependencies", [])) <= completed]
-    if not ready:
-        return "fail"
-    sends: list[Send] = []
-    for subtask in ready:
-        previous = latest.get(subtask["subtask_id"])
-        next_version = int(previous["version"]) + 1 if previous else 1
-        sends.append(
-            Send(
-                "worker",
-                {
-                    "run_id": state["run_id"],
-                    "task": state["task"],
-                    "subtask": subtask,
-                    "artifact_version": next_version,
-                    "repair_round": state.get("repair_round", 0),
-                },
-            )
-        )
-    return sends
-
-
-def _dispatch_after_schedule(state: GraphState) -> list[Send] | str:
-    if state.get("status") == RunStatus.FAILED:
-        return "fail"
-    if not state.get("pending_subtasks"):
-        return "validate"
-    return _dispatch_workers(state)
-
-
-def _review_dimensions(state: GraphState, runtime: RuntimeConfig) -> tuple[str, ...]:
-    cross_review = state.get("task", {}).get("assignment", {}).get("cross_review", True)
-    if not cross_review:
-        return ("constraint",)
-    if runtime.review_strategy == "three_dimensional":
-        return ("fact", "logic", "constraint")
-    if runtime.review_strategy == "comprehensive":
-        return ("comprehensive",)
-    risk = RiskLevel(state.get("task", {}).get("risk_level", RiskLevel.LOW))
-    task_type = str(state.get("task", {}).get("task_type", "general"))
-    if (
-        risk in runtime.deep_review_risk_levels
-        or task_type in runtime.deep_review_task_types
-    ):
-        return ("fact", "logic", "constraint")
-    return ("comprehensive",)
-
-
-def _dispatch_reviewers(
-    state: GraphState,
-    runtime: RuntimeConfig,
-) -> list[Send] | str:
-    artifacts = latest_artifacts(state.get("artifacts", []))
-    if not artifacts:
-        return "judge"
-    dimensions = _review_dimensions(state, runtime)
-    sends: list[Send] = []
-    for artifact in artifacts:
-        for dimension in dimensions:
-            sends.append(
-                Send(
-                    "reviewer",
-                    {
-                        "run_id": state["run_id"],
-                        "task": state["task"],
-                        "review_job": {"artifact": artifact, "dimension": dimension},
-                    },
-                )
-            )
-    return sends
-
-
-def _route_decision(state: GraphState, max_repair_rounds: int) -> str:
-    action = state["decision"]["action"]
-    if action == DecisionAction.APPROVE:
-        return "synthesize"
-    if action == DecisionAction.REPAIR and state.get("repair_round", 0) < max_repair_rounds:
-        return "repair_plan"
-    if action == DecisionAction.REQUEST_HUMAN:
-        return "human_gate"
-    return "fail"
-
-
-def _route_after_human(state: GraphState) -> str:
-    return "synthesize" if state["decision"]["action"] == DecisionAction.APPROVE else "fail"

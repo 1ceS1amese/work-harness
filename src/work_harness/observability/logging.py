@@ -32,6 +32,8 @@ class JsonFormatter(logging.Formatter):
         }
         for key in (
             "run_id",
+            "job_id",
+            "worker_id",
             "trace_id",
             "node",
             "status",
@@ -58,4 +60,3 @@ def configure_logging(level: str = "INFO") -> None:
 
 def get_logger(name: str) -> logging.Logger:
     return logging.getLogger(name)
-

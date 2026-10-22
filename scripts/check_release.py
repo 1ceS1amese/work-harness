@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate repository metadata and Standard Readme release invariants."""
+"""Validate repository metadata and Best-README-Template documentation structure."""
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ import re
 import sys
 import tomllib
 from pathlib import Path
+from urllib.parse import unquote, urlsplit
 
 REQUIRED_FILES = (
     "CHANGELOG.md",
@@ -35,22 +36,24 @@ REQUIRED_FILES = (
 
 README_CONTRACTS = {
     "README.md": (
-        "Table of Contents",
-        "Security",
-        "Background",
-        "Install",
+        "About the Project",
+        "Getting Started",
         "Usage",
+        "Roadmap",
         "Contributing",
         "License",
+        "Contact",
+        "Acknowledgments",
     ),
     "README.zh-CN.md": (
-        "目录",
-        "安全",
-        "背景",
-        "安装",
-        "使用",
-        "贡献",
+        "项目介绍",
+        "快速开始",
+        "使用方式",
+        "项目进度与后续方向",
+        "参与贡献",
         "许可证",
+        "联系与反馈",
+        "致谢",
     ),
 }
 
@@ -62,13 +65,23 @@ def fail(message: str, errors: list[str]) -> None:
     errors.append(message)
 
 
-def validate_readme(root: Path, name: str, description: str, errors: list[str]) -> None:
+def validate_readme(root: Path, name: str, errors: list[str]) -> None:
     path = root / name
     text = path.read_text(encoding="utf-8")
-    lines = text.splitlines()
+    prose = re.sub(r"^```[^\n]*\n.*?^```\s*$", "", text, flags=re.MULTILINE | re.DOTALL)
+    lines = prose.splitlines()
 
-    if description not in lines:
-        fail(f"{name}: short description must exactly match pyproject.toml", errors)
+    if not re.search(r"<h1>\s*Work Harness\s*</h1>\s*<p>\s*[^<\s][^<]*</p>", prose):
+        fail(f"{name}: project title and short introduction are required", errors)
+    toc_title = "Table of Contents" if name == "README.md" else "目录"
+    if not re.search(
+        rf"<details>\s*<summary>{toc_title}</summary>.*?<ol>.*?</ol>\s*</details>",
+        prose,
+        re.DOTALL,
+    ):
+        fail(f"{name}: collapsible table of contents is required", errors)
+    if '<a id="readme-top"></a>' not in prose or 'href="#readme-top"' not in prose:
+        fail(f"{name}: back-to-top navigation is required", errors)
 
     headings = [line[3:].strip() for line in lines if line.startswith("## ")]
     required = README_CONTRACTS[name]
@@ -79,17 +92,31 @@ def validate_readme(root: Path, name: str, description: str, errors: list[str]) 
             continue
         positions.append(headings.index(heading))
     if positions != sorted(positions):
-        fail(f"{name}: required sections are not in Standard Readme order", errors)
-    if not headings or headings[-1] != required[-1]:
-        fail(f"{name}: license section must be the final level-two section", errors)
+        fail(f"{name}: required sections are not in Best-README-Template order", errors)
 
-    for match in MARKDOWN_LINK.finditer(text):
-        target = match.group(1).strip().split(maxsplit=1)[0].strip("<>")
-        if not target or target.startswith(("#", "http://", "https://", "mailto:")):
+    anchors = set(re.findall(r'<a\s+id="([^"]+)"', prose))
+    anchors.update(
+        re.sub(r"[^\w\- ]", "", heading.lower()).replace(" ", "-")
+        for heading in re.findall(r"^#{1,6}\s+(.+)$", prose, re.MULTILINE)
+    )
+    references = dict(re.findall(r"^\[([^\]]+)\]:\s*(\S+)\s*$", prose, re.MULTILINE))
+    for reference in re.findall(r"\]\[([^\]]+)\]", prose):
+        if reference not in references:
+            fail(f"{name}: undefined reference link: {reference}", errors)
+    targets = (
+        [match.group(1) for match in MARKDOWN_LINK.finditer(prose)]
+        + re.findall(r'href="([^"]+)"', prose)
+        + list(references.values())
+    )
+    for target in targets:
+        target = target.strip().split(maxsplit=1)[0].strip("<>")
+        parsed = urlsplit(target)
+        if parsed.scheme or parsed.netloc:
             continue
-        relative_path = target.split("#", maxsplit=1)[0]
-        if relative_path and not (path.parent / relative_path).exists():
-            fail(f"{name}: local link target does not exist: {relative_path}", errors)
+        if parsed.path and not (path.parent / unquote(parsed.path)).exists():
+            fail(f"{name}: local link target does not exist: {parsed.path}", errors)
+        elif not parsed.path and parsed.fragment and unquote(parsed.fragment) not in anchors:
+            fail(f"{name}: local anchor does not exist: {parsed.fragment}", errors)
 
 
 def main() -> int:
@@ -135,7 +162,7 @@ def main() -> int:
 
     for name in README_CONTRACTS:
         if (root / name).is_file():
-            validate_readme(root, name, project["description"], errors)
+            validate_readme(root, name, errors)
 
     if errors:
         print("Release checks failed:", file=sys.stderr)

@@ -1,8 +1,11 @@
 # Windows 单文件版
 
 Work Harness 从 `v0.2.0` 起提供 Windows x64 单文件 `work-harness.exe`。它包含 Python
-运行时、FastAPI 后端、Vue 工作台、内置配置、Prompt、Schema、评估用例和 Skill，不要求目标
-电脑预装 Python、Node.js 或 npm。
+运行时、FastAPI 后端、Vue 工作台、原生桌面窗口、内置配置、Prompt、Schema、评估用例和
+Skill，不要求目标电脑预装 Python、Node.js 或 npm。
+
+目标系统为 Windows 10/11 x64，并需要 Microsoft Edge WebView2 Runtime。Windows 11 和大多数
+仍受支持的 Windows 10 设备已随 Edge 安装；缺失时启动器会显示明确错误，而不会弹出命令行。
 
 ## 下载与启动
 
@@ -15,11 +18,14 @@ Work Harness 从 `v0.2.0` 起提供 Windows x64 单文件 `work-harness.exe`。�
    Get-Content .\work-harness.exe.sha256
    ```
 
-3. 双击 `work-harness.exe`。程序会启动本地服务并打开
-   `http://127.0.0.1:8000/`；关闭控制台或按 `Ctrl+C` 即停止服务。
+3. 双击 `work-harness.exe`。程序不会打开命令行或外部浏览器，而是在独立的 Work Harness
+   桌面窗口中启动工作台；关闭该窗口即停止后台本地服务。
 
-程序仅监听本机回环地址。第二次双击不会创建第二个 Windows 服务进程，而是打开已运行的工作台。
-首次启动时 PyInstaller 会进行临时解包，因此可能比后续页面刷新慢几秒。
+首次打开会进入模型配置页，不会启用演示用 Mock Provider。填写接口地址、密钥和模型名称，保存
+后关闭并重新启动 EXE；完成前发送任务会被明确阻止，不会显示模拟的完成结果。
+
+程序仅监听本机回环地址。第二次双击不会创建第二个 Windows 服务进程，而是恢复并聚焦已经
+运行的桌面窗口。首次启动时 PyInstaller 会进行临时解包，因此可能慢几秒。
 
 ## 持久化目录
 
@@ -29,20 +35,28 @@ Work Harness 从 `v0.2.0` 起提供 Windows x64 单文件 `work-harness.exe`。�
 %LOCALAPPDATA%\WorkHarness\
 ├── data\checkpoints.sqlite
 ├── data\runs.sqlite
+├── data\blackboard.sqlite
 ├── data\providers.sqlite
 ├── data\providers.sqlite.key
+├── data\settings.json
+├── webview\
 ├── reports\latest-evaluation.json
 ├── exports\schemas\
-└── logs\
+└── logs\desktop.log
 ```
 
 替换或移动 EXE 不会删除这些数据。Provider 可使用环境变量 Key，也可在页面中保存认证加密后的
-Key；查询接口不会回显。使用页面凭据时，`providers.sqlite` 与 `providers.sqlite.key` 必须一起
-备份和恢复。删除上述目录会永久删除本机运行历史和 Provider 配置，请先停止程序并自行备份。
+Key；查询接口不会回显。Agent Prompt 和运行配置保存在 `settings.json`。使用页面凭据时，
+`providers.sqlite` 与 `providers.sqlite.key` 必须一起备份和恢复。删除上述目录会永久删除本机
+运行历史、Provider 和页面设置，请先停止程序并自行备份。`webview` 目录用于保留桌面窗口的
+本地会话与主题设置；模型密钥仍只保存在加密 Provider 数据库中。
 
 可在启动前通过 `WORK_HARNESS_DATA_ROOT` 改变整个数据根目录，也可使用
-`WORK_HARNESS_CHECKPOINT_PATH`、`WORK_HARNESS_RUN_STORE_PATH` 和
-`WORK_HARNESS_PROVIDER_STORE_PATH` 分别覆盖数据库位置。
+`WORK_HARNESS_CHECKPOINT_PATH`、`WORK_HARNESS_RUN_STORE_PATH`、`WORK_HARNESS_BLACKBOARD_PATH` 和
+`WORK_HARNESS_PROVIDER_STORE_PATH` 分别覆盖数据库位置。当前源码将黑板数据库与其他持久化
+数据一同保存在用户目录，已有显式路径覆盖保持优先。若此前曾在资源目录运行黑板任务，
+先用原版本和原路径完成或备份这些任务；不自动移动活动黑板或改写其执行指纹。
+本轮验证了桌面命令行入口的数据路径，尚未在 Windows 上重新构建和运行 EXE。
 
 ## 自定义模型凭据
 
@@ -61,22 +75,12 @@ $env:MY_MODEL_API_KEY = Read-Host "API Key"
 
 以上变量名只是示例；应与界面中保存的名称一致。不要把真实密钥提交到仓库、YAML 或日志。
 
-## EXE 的命令行模式
+## 诊断和 CLI
 
-EXE 带参数时不会自动启动浏览器，可直接复用原 CLI：
-
-```powershell
-.\work-harness.exe check-config
-.\work-harness.exe check-compatibility
-.\work-harness.exe skills validate
-.\work-harness.exe serve --host 127.0.0.1 --port 8765
-```
-
-`--project-root PATH` 必须放在子命令之前，可加载外部配置、Prompt、Schema 和 Skill：
-
-```powershell
-.\work-harness.exe --project-root C:\work-harness-config check-config
-```
+桌面 EXE 使用 Windows GUI 子系统，因此不会附着 PowerShell 或显示标准输出。需要
+`check-config`、`check-compatibility`、Skill 校验或自定义 `serve` 参数时，请使用源码环境中的
+`uv run work-harness ...`；桌面启动失败信息会显示在原生对话框并写入
+`%LOCALAPPDATA%\WorkHarness\logs\desktop.log`。
 
 ## 从源码构建
 
@@ -86,9 +90,10 @@ Windows x64 构建机需要 Python 3.12、uv、Node.js 22 和 npm：
 .\scripts\build_windows.ps1
 ```
 
-脚本执行锁定依赖安装、前端生产构建、PyInstaller 单文件构建、冻结配置冒烟测试，并生成
-`dist\work-harness.exe` 与 SHA-256 文件。PyInstaller 不支持从 Linux 交叉编译 Windows EXE；
-仓库的 `Windows EXE` GitHub Actions 工作流在 `windows-latest` 上执行正式发布构建。
+脚本执行锁定依赖安装、前端生产构建、PyInstaller 单文件构建、冻结配置冒烟测试，并检查生成
+文件的 PE Subsystem 必须为 Windows GUI（无控制台），最后生成 `dist\work-harness.exe` 与
+SHA-256 文件。PyInstaller 不支持从 Linux 交叉编译 Windows EXE；仓库的 `Windows EXE`
+GitHub Actions 工作流在 `windows-latest` 上执行正式发布构建。
 
 ## 当前边界
 

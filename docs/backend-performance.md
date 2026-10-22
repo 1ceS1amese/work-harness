@@ -10,7 +10,8 @@ API 契约。当前瓶颈主要来自模型调用数量、运行调度和状态�
 | --- | --- | --- |
 | 审查拓扑 | `adaptive` 默认让普通低/中风险产物执行一次综合审查，高/关键风险及研究/决策任务保留事实、逻辑、约束三维审查 | 默认两产物场景的审查调用从 6 次降至 2 次 |
 | LangGraph 分发 | Worker/Reviewer 的 `Send` 只携带节点必需字段 | 避免并行分支重复复制完整工件和模型调用历史 |
-| 运行调度 | `run_max_concurrency` 对完整 Graph Run 做背压 | 防止多个请求绕过节点级信号量压垮 Provider |
+| 运行调度 | `run_max_concurrency` 限制执行数，`run_queue_capacity` 限制等待数 | 防止请求被无界创建为后台 Task 并压垮进程与 Provider |
+| 多实例队列 | PostgreSQL 原子提交、全局容量锁、`SKIP LOCKED` 领取、租约/fencing 和按 Graph revision 路由 | API 与执行解耦，多个 Worker 无锁队头串行且可接管崩溃任务 |
 | Provider 调度 | 每个 Provider 独立 `max_concurrency` 信号量，共享 HTTP 连接池 | 隔离不同模型端点并限制排队压力 |
 | SSE | 节点完成时发布合并信号，消费者按需读取快照；空闲时仅发送 keepalive | 移除每个连接每 250 ms 的完整 Checkpoint 轮询 |
 | Tool | 对声明为 `idempotent` 的工具启用有界、运行级缓存 | 避免同一运行中相同只读调用重复执行 |
@@ -27,11 +28,19 @@ API 契约。当前瓶颈主要来自模型调用数量、运行调度和状态�
 
 ```yaml
 run_max_concurrency: 4
+run_queue_capacity: 8
+run_queue_retry_after_seconds: 5
 review_strategy: adaptive
 deep_review_risk_levels: [high, critical]
 deep_review_task_types: [research, decision]
 tool_cache_max_entries: 256
 sse_keepalive_seconds: 15
+execution:
+  role: embedded  # distributed profile uses api or worker
+  poll_interval_seconds: 0.5
+  job_max_attempts: 3
+  retry_base_seconds: 2
+  retry_max_seconds: 60
 ```
 
 ```yaml
@@ -39,6 +48,23 @@ providers:
   compatible:
     max_concurrency: 8
 ```
+
+单进程最多接纳 `run_max_concurrency + run_queue_capacity` 个未完成运行。容量耗尽时，
+`POST /v1/runs` 和人工恢复接口返回 `429` 与 `Retry-After`；已成功保留的幂等请求即使此时
+重试，仍返回原 `run_id`，不会被误报为过载。`/health` 的 `scheduler` 同时公开活动数、
+等待数、剩余接纳槽、累计接纳/拒绝/恢复数和本次恢复扫描观察到的积压。累计值属于当前
+进程生命周期，不是跨重启的业务计数。
+
+分布式模式中，`run_queue_capacity` 是 PostgreSQL 内所有 API 共享的 available Job 上限；Worker
+总执行容量是所有存活 Worker 的 `run_max_concurrency` 之和。`/health.scheduler` 额外公开共享队列
+各状态数量、不兼容 active Job、最老等待时间、存活 Worker 数/容量/活动数，以及配置摘要是否
+一致。不兼容 active Job 非零会使 readiness 失败，避免滚动升级后静默搁置旧任务。队列统计来自
+数据库，进程内累计接纳/拒绝计数仍只代表当前 API 实例。
+
+领取事务用 `SKIP LOCKED` 选择同一 `graph_revision` 的候选行。已经耗尽尝试次数的过期租约只
+获得一次 Checkpoint 对账权：终态直接确认，活动态才进入 dead，避免确认窗口崩溃把成功结果误判
+为失败。短轮询间隔只影响空队列领取延迟，不影响任务是否存在；任务事实始终在 PostgreSQL，
+跨实例 SSE 通知丢失时还会通过 keepalive 周期读取收敛。
 
 `review_strategy` 可选：
 
@@ -83,8 +109,14 @@ p95 65.62 ms、p99 76.15 ms，平均 7 次模型调用、2 次审查调用，进
 
 ## 保留的边界
 
-- SQLite、进程内信号量和 SSE 订阅表仍限定为单实例部署。
-- SSE 当前推送完整运行快照，但只在状态更新时读取；跨实例回放需要持久事件表或消息总线。
+- SQLite、进程内接纳队列和本地 SSE 订阅表仍限定为 embedded 单实例；多实例必须同时启用
+  PostgreSQL RunStore、可靠队列和 PostgreSQL Checkpointer。
+- PostgreSQL 队列只承诺 at-least-once 调度；fencing 阻止旧 Worker 写队列终态，但不能撤销已经
+  发出的模型请求或外部 Tool 副作用。
+- SSE 当前推送完整运行快照，并用 PostgreSQL NOTIFY 加速跨实例唤醒；断线事件回放仍需要持久
+  event 表，NOTIFY 不是审计日志。
 - Tool 缓存限定在单次运行内，运行终止或取消后清理，不跨用户复用结果。
 - Provider 等待时间计入调用超时，过载会快速失败而不是无限排队。
+- Mock 基准没有测量 PostgreSQL submit/claim p95、队列延迟或连接池上限；正式容量规划必须在
+  目标数据库、真实 Provider 和预期 Worker 数量下另做负载测试。
 - 是否替换 ASGI Server、序列化库或 Web 框架，应以真实 p95/p99 与 CPU profile 为依据。

@@ -1,14 +1,9 @@
 from __future__ import annotations
 
-import asyncio
-import hashlib
 import json
-from typing import Any, TypeVar
+from typing import Any
 from uuid import uuid4
 
-from pydantic import BaseModel
-
-from work_harness.config.models import AppConfig
 from work_harness.domain.enums import (
     AgentFunction,
     AllocationMode,
@@ -20,280 +15,21 @@ from work_harness.domain.enums import (
 )
 from work_harness.domain.models import (
     AgentAssignment,
-    Artifact,
     Decision,
-    ModelCallRecord,
     ModelMessage,
     ModelRequest,
-    ModelResponse,
     Plan,
-    Review,
     RunError,
     SubtaskSpec,
     TaskRequest,
     TaskSpec,
-    ToolCallRecord,
 )
-from work_harness.llm.gateway import ModelGateway
-from work_harness.observability.trace import TraceRecorder
-from work_harness.prompts import PromptRegistry
-from work_harness.skills import SkillRegistry
-from work_harness.tools.gateway import ToolGateway
+from work_harness.workflow.agent_services import AgentServices
+from work_harness.workflow.contracts import WORKFLOW_REVISION
 from work_harness.workflow.state import GraphState, latest_artifacts, latest_reviews
 
-ContractT = TypeVar("ContractT", bound=BaseModel)
 
-
-class WorkflowNodes:
-    def __init__(
-        self,
-        *,
-        config: AppConfig,
-        gateway: ModelGateway,
-        prompts: PromptRegistry,
-        trace: TraceRecorder,
-        tool_gateway: ToolGateway,
-        skills: SkillRegistry,
-    ) -> None:
-        self.config = config
-        self.gateway = gateway
-        self.prompts = prompts
-        self.trace = trace
-        self.tool_gateway = tool_gateway
-        self.skills = skills
-        self.worker_slots = asyncio.Semaphore(config.runtime.worker_max_concurrency)
-        self.reviewer_slots = asyncio.Semaphore(config.runtime.reviewer_max_concurrency)
-
-    async def _structured_call(
-        self,
-        *,
-        state: GraphState,
-        node_name: str,
-        agent_role: str,
-        prompt_name: str,
-        logical_model: str,
-        operation: str,
-        payload: dict[str, Any],
-        output_model: type[ContractT],
-        token_budget: int,
-        cost_budget_usd: float,
-    ) -> tuple[ContractT, ModelResponse]:
-        prompt = self.prompts.get(prompt_name)
-        trace_id = f"trace_{uuid4().hex}"
-        task = state.get("task", {})
-        request = ModelRequest(
-            run_id=state["run_id"],
-            trace_id=trace_id,
-            node_name=node_name,
-            agent_role=agent_role,
-            logical_model=logical_model,
-            messages=[
-                ModelMessage(role="system", content=prompt.body),
-                ModelMessage(
-                    role="user",
-                    content=json.dumps(payload, ensure_ascii=False, default=str),
-                ),
-            ],
-            required_capabilities={"chat", "structured_output"},
-            response_schema=output_model.model_json_schema(),
-            timeout_seconds=self.config.runtime.node_timeout_seconds,
-            token_budget=token_budget,
-            cost_budget_usd=cost_budget_usd,
-            risk_level=task.get("risk_level", RiskLevel.LOW),
-            metadata={
-                "operation": operation,
-                "payload": payload,
-                "prompt_name": prompt.name,
-                "prompt_version": prompt.version,
-            },
-        )
-        response = await self.gateway.complete(request)
-        if response.structured_output is None:
-            raise ValueError(f"{node_name} did not return structured output")
-        return output_model.model_validate(response.structured_output), response
-
-    @staticmethod
-    def _model_call(
-        node: str,
-        response: ModelResponse,
-        *,
-        skill_ids: tuple[str, ...] = (),
-    ) -> dict[str, Any]:
-        return ModelCallRecord(
-            node=node,
-            provider=response.provider,
-            model=response.model,
-            input_tokens=response.usage.input_tokens,
-            output_tokens=response.usage.output_tokens,
-            cached_tokens=response.usage.cached_tokens,
-            estimated_cost_usd=response.usage.estimated_cost_usd,
-            latency_ms=response.latency_ms,
-            retries=response.retries,
-            fallback_from=response.fallback_from,
-            skill_ids=list(skill_ids),
-        ).model_dump(mode="json")
-
-    @staticmethod
-    def _fingerprint(value: Any) -> str:
-        serialized = json.dumps(
-            value,
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
-            default=str,
-        )
-        return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
-
-    @staticmethod
-    def _parse_tool_call(raw_call: dict[str, Any]) -> tuple[str, str, dict[str, object]]:
-        function = raw_call.get("function")
-        call_id = raw_call.get("id")
-        if not isinstance(call_id, str) or not isinstance(function, dict):
-            raise ValueError("model returned an invalid tool call envelope")
-        name = function.get("name")
-        raw_arguments = function.get("arguments", {})
-        if not isinstance(name, str):
-            raise ValueError("model tool call is missing a function name")
-        if isinstance(raw_arguments, str):
-            try:
-                arguments = json.loads(raw_arguments)
-            except json.JSONDecodeError as exc:
-                raise ValueError("model returned invalid JSON tool arguments") from exc
-        else:
-            arguments = raw_arguments
-        if not isinstance(arguments, dict):
-            raise ValueError("model tool arguments must be a JSON object")
-        return call_id, name, arguments
-
-    async def _worker_call(
-        self,
-        *,
-        state: GraphState,
-        subtask: SubtaskSpec,
-        token_budget: int,
-        cost_budget_usd: float,
-        max_steps: int,
-    ) -> tuple[Artifact, list[ModelResponse], list[dict[str, Any]]]:
-        prompt = self.prompts.get("worker")
-        task = TaskSpec.model_validate(state["task"])
-        skill_context = self.skills.resolve(
-            task.skills,
-            subtask.skill_ids,
-            function=subtask.assigned_function,
-        )
-        payload = {
-            "task": state["task"],
-            "subtask": subtask.model_dump(mode="json"),
-            "version": state.get("artifact_version", 1),
-            "repair_round": state.get("repair_round", 0),
-        }
-        system_content = prompt.body
-        if skill_context.instructions:
-            system_content = f"{system_content}\n\n{skill_context.instructions}"
-        messages = [
-            ModelMessage(role="system", content=system_content),
-            ModelMessage(
-                role="user",
-                content=json.dumps(payload, ensure_ascii=False, default=str),
-            ),
-        ]
-        tools = self.tool_gateway.definitions(
-            role=subtask.worker_role,
-            names=subtask.allowed_tools,
-        )
-        responses: list[ModelResponse] = []
-        tool_records: list[dict[str, Any]] = []
-        for _ in range(max_steps):
-            request = ModelRequest(
-                run_id=state["run_id"],
-                trace_id=f"trace_{uuid4().hex}",
-                node_name="worker",
-                agent_role=subtask.worker_role,
-                logical_model=subtask.logical_model,
-                messages=messages,
-                required_capabilities={"chat", "structured_output"}
-                | set(skill_context.required_capabilities)
-                | ({"tool_calling"} if tools else set()),
-                provider_preferences=list(skill_context.provider_preferences),
-                provider_allowlist=set(skill_context.provider_allowlist),
-                tools=tools,
-                response_schema=Artifact.model_json_schema(),
-                timeout_seconds=self.config.runtime.node_timeout_seconds,
-                token_budget=token_budget,
-                cost_budget_usd=cost_budget_usd,
-                risk_level=state["task"].get("risk_level", RiskLevel.LOW),
-                metadata={
-                    "operation": "worker",
-                    "payload": payload,
-                    "prompt_name": prompt.name,
-                    "prompt_version": prompt.version,
-                    "tool_round": len(tool_records),
-                    "skill_ids": list(skill_context.skill_ids),
-                },
-            )
-            response = await self.gateway.complete(request)
-            responses.append(response)
-            if response.tool_calls:
-                if not tools:
-                    raise ValueError("worker requested a tool that was not advertised")
-                messages.append(
-                    ModelMessage(
-                        role="assistant",
-                        content=response.content,
-                        tool_calls=response.tool_calls,
-                        reasoning_content=response.reasoning_content,
-                        response_items=response.response_items,
-                    )
-                )
-                for raw_call in response.tool_calls:
-                    call_id, name, arguments = self._parse_tool_call(raw_call)
-                    if name not in subtask.allowed_tools:
-                        raise ValueError(f"worker requested a disallowed tool: {name}")
-                    execution = await self.tool_gateway.execute(
-                        run_id=state["run_id"],
-                        role=subtask.worker_role,
-                        tool_name=name,
-                        arguments=arguments,
-                        call_id=call_id,
-                    )
-                    tool_records.append(
-                        ToolCallRecord(
-                            node="worker",
-                            role=subtask.worker_role,
-                            tool_name=name,
-                            call_id=execution.call_id,
-                            input_fingerprint=self._fingerprint(arguments),
-                            output_summary=execution.output_summary,
-                            truncated=execution.truncated,
-                            duration_ms=execution.duration_ms,
-                            cache_hit=execution.cache_hit,
-                        ).model_dump(mode="json")
-                    )
-                    messages.append(
-                        ModelMessage(
-                            role="tool",
-                            tool_call_id=execution.call_id,
-                            content=execution.output_summary,
-                        )
-                    )
-                continue
-            if response.structured_output is None:
-                raise ValueError("worker did not return structured output")
-            return Artifact.model_validate(response.structured_output), responses, tool_records
-        raise ValueError("worker exceeded its configured model/tool step limit")
-
-    def _budget_exceeded(self, state: GraphState) -> bool:
-        calls = state.get("model_calls", [])
-        tokens = sum(
-            int(item.get("input_tokens", 0)) + int(item.get("output_tokens", 0))
-            for item in calls
-        )
-        cost = sum(float(item.get("estimated_cost_usd", 0)) for item in calls)
-        return (
-            tokens >= self.config.runtime.token_budget
-            or cost >= self.config.runtime.cost_budget_usd
-        )
-
+class WorkflowNodes(AgentServices):
     async def normalize(self, state: GraphState) -> dict[str, Any]:
         run_id = state["run_id"]
         async with self.trace.span(run_id=run_id, node="normalize"):
@@ -323,6 +59,7 @@ class WorkflowNodes:
             )
             return {
                 "task": task.model_dump(mode="json"),
+                "workflow_revision": WORKFLOW_REVISION,
                 "status": RunStatus.RUNNING.value,
                 "repair_round": 0,
             }
@@ -330,7 +67,7 @@ class WorkflowNodes:
     async def plan(self, state: GraphState) -> dict[str, Any]:
         async with self.trace.span(run_id=state["run_id"], node="plan"):
             role = self.config.agents.agents["planner"]
-            plan, response = await self._structured_call(
+            plan, response = await self.structured_call(
                 state=state,
                 node_name="plan",
                 agent_role="planner",
@@ -342,10 +79,17 @@ class WorkflowNodes:
                     "selected_skills": self.skills.planner_context(
                         TaskSpec.model_validate(state["task"]).skills
                     ),
+                    "execution_limits": {
+                        "token_accounting": "observed_usage_only",
+                        "workers": {
+                            name: {"max_output_tokens": worker.max_output_tokens}
+                            for name, worker in self.config.agents.agents.items()
+                            if worker.assignable
+                        },
+                    },
                 },
                 output_model=Plan,
-                token_budget=role.token_budget,
-                cost_budget_usd=role.cost_budget_usd,
+                max_output_tokens=role.max_output_tokens,
             )
             if len(plan.subtasks) > self.config.runtime.max_planned_subtasks:
                 raise ValueError(
@@ -356,39 +100,9 @@ class WorkflowNodes:
             return {
                 "plan": plan.model_dump(mode="json"),
                 "pending_subtasks": [item.model_dump(mode="json") for item in plan.subtasks],
-                "model_calls": [self._model_call("plan", response)],
+                "required_versions": {item.subtask_id: 1 for item in plan.subtasks},
+                "model_calls": [self.model_call("plan", response)],
             }
-
-    async def worker(self, state: GraphState) -> dict[str, Any]:
-        async with self.worker_slots:
-            async with self.trace.span(run_id=state["run_id"], node="worker"):
-                subtask = SubtaskSpec.model_validate(state["subtask"])
-                role = self.config.agents.agents.get(subtask.worker_role)
-                if role is None or not role.assignable:
-                    raise ValueError(
-                        f"subtask references non-assignable agent: {subtask.worker_role}"
-                    )
-                artifact, responses, tool_records = await self._worker_call(
-                    state=state,
-                    subtask=subtask,
-                    token_budget=min(subtask.token_budget, role.token_budget),
-                    cost_budget_usd=min(subtask.cost_budget_usd, role.cost_budget_usd),
-                    max_steps=role.max_steps,
-                )
-                if len(artifact.content) > self.config.runtime.max_artifact_chars:
-                    raise ValueError("artifact exceeds configured size limit")
-                return {
-                    "artifacts": [artifact.model_dump(mode="json")],
-                    "model_calls": [
-                        self._model_call(
-                            "worker",
-                            response,
-                            skill_ids=tuple(subtask.skill_ids),
-                        )
-                        for response in responses
-                    ],
-                    "tool_calls": tool_records,
-                }
 
     def _apply_assignment_policy(self, plan: Plan, task: TaskSpec) -> Plan:
         assignment = AgentAssignment.model_validate(task.assignment)
@@ -533,9 +247,14 @@ class WorkflowNodes:
             failed: list[str] = []
             for item in state.get("pending_subtasks", []):
                 artifact = latest.get(item["subtask_id"])
-                if artifact and artifact["status"] == ArtifactStatus.SUCCESS:
+                current = artifact is not None and artifact["version"] >= state.get(
+                    "required_versions", {}
+                ).get(item["subtask_id"], 1)
+                if current and artifact["status"] == ArtifactStatus.SUCCESS:
                     continue
-                if artifact and artifact["status"] == ArtifactStatus.FAILED:
+                if current and artifact["status"] in {
+                    ArtifactStatus.FAILED, ArtifactStatus.PARTIAL,
+                }:
                     failed.append(item["subtask_id"])
                 pending.append(item)
             if failed:
@@ -588,47 +307,11 @@ class WorkflowNodes:
                     )
             return {"validation_issues": issues}
 
-    async def reviewer(self, state: GraphState) -> dict[str, Any]:
-        async with self.reviewer_slots:
-            async with self.trace.span(run_id=state["run_id"], node="reviewer"):
-                job = state["review_job"]
-                artifact = Artifact.model_validate(job["artifact"])
-                role = self.config.agents.agents["reviewer"]
-                review, response = await self._structured_call(
-                    state=state,
-                    node_name="reviewer",
-                    agent_role="reviewer",
-                    prompt_name="reviewer",
-                    logical_model=role.logical_model,
-                    operation="review",
-                    payload={
-                        "task": state["task"],
-                        "artifact": artifact.model_dump(mode="json"),
-                        "dimension": job["dimension"],
-                    },
-                    output_model=Review,
-                    token_budget=role.token_budget,
-                    cost_budget_usd=role.cost_budget_usd,
-                )
-                return {
-                    "reviews": [review.model_dump(mode="json")],
-                    "model_calls": [self._model_call("reviewer", response)],
-                }
-
     async def judge(self, state: GraphState) -> dict[str, Any]:
         async with self.trace.span(run_id=state["run_id"], node="judge"):
-            if self._budget_exceeded(state):
-                decision = Decision(
-                    action=DecisionAction.FAIL,
-                    reasons=["Global token or cost budget has been exhausted."],
-                )
-                return {
-                    "decision": decision.model_dump(mode="json"),
-                    "status": RunStatus.FAILED.value,
-                }
             role = self.config.agents.agents["judge"]
             current_reviews = latest_reviews(state.get("reviews", []), state["artifacts"])
-            decision, response = await self._structured_call(
+            decision, response = await self.structured_call(
                 state=state,
                 node_name="judge",
                 agent_role="judge",
@@ -643,12 +326,11 @@ class WorkflowNodes:
                     "repair_round": state.get("repair_round", 0),
                 },
                 output_model=Decision,
-                token_budget=role.token_budget,
-                cost_budget_usd=role.cost_budget_usd,
+                max_output_tokens=role.max_output_tokens,
             )
             update: dict[str, Any] = {
                 "decision": decision.model_dump(mode="json"),
-                "model_calls": [self._model_call("judge", response)],
+                "model_calls": [self.model_call("judge", response)],
             }
             if decision.action == DecisionAction.REQUEST_HUMAN:
                 update["status"] = RunStatus.WAITING_HUMAN.value
@@ -661,8 +343,23 @@ class WorkflowNodes:
             decision = Decision.model_validate(state["decision"])
             plan = Plan.model_validate(state["plan"])
             targets = set(decision.target_subtasks)
+            known = {item.subtask_id for item in plan.subtasks}
+            if targets - known:
+                raise ValueError("repair targets must reference planned subtasks")
             if not targets:
-                targets = {item.subtask_id for item in plan.subtasks}
+                targets = known
+            # Every descendant must be recomputed after its inputs change.
+            while True:
+                expanded = targets | {
+                    item.subtask_id for item in plan.subtasks
+                    if targets.intersection(item.dependencies)
+                }
+                if expanded == targets:
+                    break
+                targets = expanded
+            latest = {item["subtask_id"]: item for item in latest_artifacts(state["artifacts"])}
+            required = dict(state.get("required_versions", {}))
+            required.update({key: int(latest[key]["version"]) + 1 for key in targets})
             selected = [
                 item.model_dump(mode="json")
                 for item in plan.subtasks
@@ -670,8 +367,8 @@ class WorkflowNodes:
             ]
             return {
                 "pending_subtasks": selected,
+                "required_versions": required,
                 "repair_round": state.get("repair_round", 0) + 1,
-                "validation_issues": [],
                 "status": RunStatus.RUNNING.value,
             }
 
@@ -707,16 +404,6 @@ class WorkflowNodes:
 
     async def synthesize(self, state: GraphState) -> dict[str, Any]:
         async with self.trace.span(run_id=state["run_id"], node="synthesize"):
-            if self._budget_exceeded(state):
-                error = RunError(
-                    code="budget_exhausted",
-                    message="Global token or cost budget was exhausted before synthesis.",
-                    node="synthesize",
-                )
-                return {
-                    "status": RunStatus.FAILED.value,
-                    "errors": [error.model_dump(mode="json")],
-                }
             role = self.config.agents.agents["synthesizer"]
             prompt = self.prompts.get("synthesizer")
             artifacts = latest_artifacts(state["artifacts"])
@@ -737,8 +424,7 @@ class WorkflowNodes:
                         ),
                     ),
                 ],
-                token_budget=role.token_budget,
-                cost_budget_usd=role.cost_budget_usd,
+                max_output_tokens=role.max_output_tokens,
                 risk_level=state["task"]["risk_level"],
                 metadata={
                     "operation": "synthesize",
@@ -751,7 +437,7 @@ class WorkflowNodes:
             return {
                 "final_output": response.content,
                 "status": RunStatus.SUCCEEDED.value,
-                "model_calls": [self._model_call("synthesize", response)],
+                "model_calls": [self.model_call("synthesize", response)],
             }
 
     async def fail(self, state: GraphState) -> dict[str, Any]:

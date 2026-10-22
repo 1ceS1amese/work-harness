@@ -11,8 +11,7 @@ agents:
     output_schema: TaskSpec
     max_steps: 1
     timeout_seconds: 10
-    token_budget: 1500
-    cost_budget_usd: 0.10
+    max_output_tokens: 1500
     reviewers: []
     repairable: false
   planner:
@@ -26,8 +25,7 @@ agents:
     output_schema: Plan
     max_steps: 2
     timeout_seconds: 60
-    token_budget: 5000
-    cost_budget_usd: 0.50
+    max_output_tokens: 5000
     reviewers: [constraint]
     repairable: true
   worker-01:
@@ -42,8 +40,7 @@ agents:
     output_schema: Artifact
     max_steps: 8
     timeout_seconds: 120
-    token_budget: 10000
-    cost_budget_usd: 1.00
+    max_output_tokens: 10000
     reviewers: [fact, logic, constraint]
     repairable: true
   worker-02:
@@ -58,8 +55,7 @@ agents:
     output_schema: Artifact
     max_steps: 8
     timeout_seconds: 120
-    token_budget: 10000
-    cost_budget_usd: 1.00
+    max_output_tokens: 10000
     reviewers: [fact, logic, constraint]
     repairable: true
   worker-03:
@@ -74,8 +70,7 @@ agents:
     output_schema: Artifact
     max_steps: 8
     timeout_seconds: 120
-    token_budget: 10000
-    cost_budget_usd: 1.00
+    max_output_tokens: 10000
     reviewers: [fact, logic, constraint]
     repairable: true
   worker-04:
@@ -90,8 +85,7 @@ agents:
     output_schema: Artifact
     max_steps: 8
     timeout_seconds: 120
-    token_budget: 10000
-    cost_budget_usd: 1.00
+    max_output_tokens: 10000
     reviewers: [fact, logic, constraint]
     repairable: true
   reviewer:
@@ -105,8 +99,7 @@ agents:
     output_schema: Review
     max_steps: 2
     timeout_seconds: 60
-    token_budget: 3000
-    cost_budget_usd: 0.30
+    max_output_tokens: 3000
     reviewers: []
     repairable: false
   judge:
@@ -120,8 +113,7 @@ agents:
     output_schema: Decision
     max_steps: 2
     timeout_seconds: 60
-    token_budget: 3000
-    cost_budget_usd: 0.30
+    max_output_tokens: 3000
     reviewers: []
     repairable: false
   synthesizer:
@@ -135,7 +127,6 @@ agents:
     output_schema: RunResult
     max_steps: 2
     timeout_seconds: 60
-    token_budget: 6000
-    cost_budget_usd: 0.60
+    max_output_tokens: 6000
     reviewers: [constraint]
     repairable: true

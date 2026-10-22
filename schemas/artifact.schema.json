@@ -84,7 +84,7 @@
       "type": "integer"
     },
     "content": {
-      "maxLength": 50000,
+      "maxLength": 200000,
       "minLength": 1,
       "title": "Content",
       "type": "string"

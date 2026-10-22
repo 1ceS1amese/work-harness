@@ -46,6 +46,7 @@ async def _run_once(
     run_id = await manager.start(
         TaskRequest(
             goal=f"Benchmark deterministic backend run {index}",
+            engine="legacy",
             risk_level=risk_level,
         )
     )

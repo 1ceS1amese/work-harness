@@ -37,6 +37,12 @@ def _load_yaml(path: Path) -> dict[str, Any]:
         value = yaml.safe_load(stream)
     if not isinstance(value, dict):
         raise ValueError(f"configuration root must be a mapping: {path}")
+    # Normalize before merging so old profile overrides still override the new base key.
+    if path.name == "agents.yaml":
+        for role in value.get("agents", {}).values():
+            if isinstance(role, dict) and "token_budget" in role:
+                old = role.pop("token_budget")
+                role.setdefault("max_output_tokens", old)
     return value
 
 
@@ -61,9 +67,33 @@ def _profiled(config_dir: Path, name: str, profile: str) -> dict[str, Any]:
 def load_app_config(project_root: Path | str | None = None) -> AppConfig:
     root = Path(project_root or default_project_root()).resolve()
     config_dir = root / "config"
-    profile = os.getenv("WORK_HARNESS_PROFILE", "local").strip() or "local"
+    profile = os.getenv("WORK_HARNESS_PROFILE", "setup").strip() or "setup"
+    supported_profiles = {"setup", "local", "secure", "production", "distributed"}
+    if profile not in supported_profiles:
+        raise ValueError(
+            f"unsupported WORK_HARNESS_PROFILE {profile!r}; "
+            f"expected one of {sorted(supported_profiles)}"
+        )
 
     runtime_data = _profiled(config_dir, "runtime", profile)
+    for environment_name, key in (
+        ("WORK_HARNESS_WORKFLOW_ENGINE", "engine"),
+        ("WORK_HARNESS_ACCEPT_NEW_BLACKBOARD_RUNS", "accept_new_blackboard_runs"),
+        ("WORK_HARNESS_BLACKBOARD_PATH", "blackboard_path"),
+    ):
+        value = os.getenv(environment_name, "").strip()
+        if value:
+            workflow = runtime_data.setdefault("workflow", {})
+            if key == "blackboard_path":
+                workflow.setdefault("blackboard", {})["path"] = value
+            else:
+                workflow[key] = value
+    execution_role = os.getenv("WORK_HARNESS_EXECUTION_ROLE", "").strip()
+    if execution_role:
+        runtime_data = _deep_merge(
+            runtime_data,
+            {"execution": {"role": execution_role}},
+        )
     checkpoint_override = os.getenv("WORK_HARNESS_CHECKPOINT_PATH")
     if checkpoint_override:
         runtime_data = _deep_merge(
@@ -85,9 +115,43 @@ def load_app_config(project_root: Path | str | None = None) -> AppConfig:
     log_level = os.getenv("WORK_HARNESS_LOG_LEVEL")
     if log_level:
         runtime_data = _deep_merge(runtime_data, {"trace": {"log_level": log_level}})
+    runtime_environment = {
+        "WORK_HARNESS_RUN_MAX_CONCURRENCY": "run_max_concurrency",
+        "WORK_HARNESS_RUN_QUEUE_CAPACITY": "run_queue_capacity",
+        "WORK_HARNESS_RUN_QUEUE_RETRY_AFTER_SECONDS": ("run_queue_retry_after_seconds"),
+        "WORK_HARNESS_RUN_TIMEOUT_SECONDS": "run_timeout_seconds",
+        "WORK_HARNESS_RUN_LEASE_SECONDS": "run_lease_seconds",
+        "WORK_HARNESS_HEARTBEAT_INTERVAL_SECONDS": "heartbeat_interval_seconds",
+    }
+    for environment_name, field_name in runtime_environment.items():
+        value = os.getenv(environment_name, "").strip()
+        if value:
+            runtime_data[field_name] = value
+    execution_environment = {
+        "WORK_HARNESS_EXECUTION_POLL_INTERVAL_SECONDS": "poll_interval_seconds",
+        "WORK_HARNESS_WORKER_STALE_SECONDS": "worker_stale_seconds",
+        "WORK_HARNESS_JOB_MAX_ATTEMPTS": "job_max_attempts",
+        "WORK_HARNESS_RETRY_BASE_SECONDS": "retry_base_seconds",
+        "WORK_HARNESS_RETRY_MAX_SECONDS": "retry_max_seconds",
+    }
+    for environment_name, field_name in execution_environment.items():
+        value = os.getenv(environment_name, "").strip()
+        if value:
+            runtime_data.setdefault("execution", {})[field_name] = value
 
     models_data = _profiled(config_dir, "models", profile)
     models_data["profile"] = profile
+    default_model_id = os.getenv("MODEL_ID", "").strip()
+    if default_model_id:
+        compatible = models_data.get("providers", {}).get("compatible")
+        if isinstance(compatible, dict):
+            compatible["allowed_models"] = [default_model_id]
+        for logical in models_data.get("logical_models", {}).values():
+            if not isinstance(logical, dict):
+                continue
+            for candidate in logical.get("candidates", []):
+                if isinstance(candidate, dict) and candidate.get("provider") == "compatible":
+                    candidate["model"] = default_model_id
 
     return AppConfig(
         project_root=root,

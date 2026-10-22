@@ -12,8 +12,14 @@ class PromptTemplate:
 
 
 class PromptRegistry:
-    def __init__(self, prompt_dir: Path) -> None:
+    def __init__(
+        self,
+        prompt_dir: Path,
+        *,
+        overrides: dict[str, str] | None = None,
+    ) -> None:
         self._prompt_dir = prompt_dir
+        self._overrides = dict(overrides or {})
         self._cache: dict[str, PromptTemplate] = {}
 
     def get(self, name: str) -> PromptTemplate:
@@ -31,7 +37,11 @@ class PromptRegistry:
                 key, separator, value = line.partition(":")
                 if separator and key.strip() == "version":
                     version = value.strip()
-        template = PromptTemplate(name=name, version=version, body=body.strip())
+        override = self._overrides.get(name)
+        template = PromptTemplate(
+            name=name,
+            version=f"{version}+custom" if override is not None else version,
+            body=override if override is not None else body.strip(),
+        )
         self._cache[name] = template
         return template
-

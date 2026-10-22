@@ -41,12 +41,20 @@ if (-not (Test-Path $Executable -PathType Leaf)) {
 $SmokeData = Join-Path ([System.IO.Path]::GetTempPath()) ("work-harness-smoke-" + [guid]::NewGuid())
 try {
     $env:WORK_HARNESS_DATA_ROOT = $SmokeData
-    & $Executable check-config
-    if ($LASTEXITCODE -ne 0) { throw "Executable configuration smoke test failed." }
+    $SmokeProcess = Start-Process -FilePath $Executable -ArgumentList "check-config" -Wait -PassThru
+    if ($SmokeProcess.ExitCode -ne 0) { throw "Executable configuration smoke test failed." }
 }
 finally {
     Remove-Item Env:WORK_HARNESS_DATA_ROOT -ErrorAction SilentlyContinue
     Remove-Item $SmokeData -Recurse -Force -ErrorAction SilentlyContinue
+}
+
+$ExecutableBytes = [System.IO.File]::ReadAllBytes($Executable)
+$PeHeaderOffset = [System.BitConverter]::ToInt32($ExecutableBytes, 0x3c)
+$OptionalHeaderOffset = $PeHeaderOffset + 24
+$Subsystem = [System.BitConverter]::ToUInt16($ExecutableBytes, $OptionalHeaderOffset + 68)
+if ($Subsystem -ne 2) {
+    throw "Expected a Windows GUI executable (PE subsystem 2), got subsystem $Subsystem."
 }
 
 $Hash = (Get-FileHash -Algorithm SHA256 $Executable).Hash.ToLowerInvariant()

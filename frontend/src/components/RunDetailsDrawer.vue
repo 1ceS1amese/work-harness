@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 
-import type { AgentDescriptor, RunResult } from '../types'
+import type { AgentDescriptor, AgentInteraction, RunResult } from '../types'
 import {
   functionLabel,
   nodeLabel,
@@ -12,9 +12,11 @@ import {
   toolLabel,
 } from '../utils/labels'
 import { getRunStage, statusTagType, STATUS_LABELS } from '../utils/run'
+import BlackboardRunDetails from './BlackboardRunDetails.vue'
 
 const open = defineModel<boolean>({ required: true })
 const props = defineProps<{ run: RunResult | null; agents: AgentDescriptor[] }>()
+const emit = defineEmits<{ update: [run: RunResult] }>()
 
 const stage = computed(() => (props.run ? getRunStage(props.run) : null))
 const totalLatency = computed(
@@ -26,7 +28,16 @@ function percent(value: number): string {
 }
 
 function agentName(agentId: string): string {
+  if (agentId === 'coordinator') return '任务协调组'
   return props.agents.find((item) => item.id === agentId)?.display_name ?? agentId
+}
+
+const interactionLabels: Record<AgentInteraction['kind'], string> = {
+  assignment: '分派任务',
+  dependency: '传递上游成果',
+  repair: '反馈与返工',
+  result: '提交成果',
+  review: '提交复核',
 }
 
 function artifactTitle(subtaskId: string): string {
@@ -36,7 +47,7 @@ function artifactTitle(subtaskId: string): string {
 </script>
 
 <template>
-  <el-drawer v-model="open" size="min(620px, 92vw)" class="details-drawer">
+  <el-drawer v-model="open" :size="run?.engine === 'blackboard' ? 'min(1100px, 96vw)' : 'min(620px, 92vw)'" class="details-drawer">
     <template #header>
       <div class="drawer-title">
         <span>任务详情</span>
@@ -45,6 +56,9 @@ function artifactTitle(subtaskId: string): string {
     </template>
 
     <el-empty v-if="!run" description="这次任务还没有详细记录" />
+    <template v-else-if="run.engine === 'blackboard'">
+      <BlackboardRunDetails v-if="open" :key="run.run_id" :run="run" @update="emit('update', $event)" />
+    </template>
     <div v-else class="details-content">
       <section class="detail-section summary-section">
         <div>
@@ -61,9 +75,12 @@ function artifactTitle(subtaskId: string): string {
         <div><span>分工数量</span><strong>{{ run.plan?.subtasks.length ?? 0 }}</strong></div>
         <div><span>AI 沟通次数</span><strong>{{ run.model_calls.length }}</strong></div>
         <div><span>使用工具次数</span><strong>{{ run.tool_calls.length }}</strong></div>
-        <div><span>模型用量</span><strong>{{ run.usage.input_tokens + run.usage.output_tokens }}</strong></div>
+        <div><span>已记录 Token</span><strong>{{ run.usage.input_tokens + run.usage.output_tokens }}</strong></div>
         <div><span>模型处理时间</span><strong>{{ (totalLatency / 1000).toFixed(1) }}s</strong></div>
       </section>
+
+      <p>输入 {{ run.usage.input_tokens }} · 输出 {{ run.usage.output_tokens }} · 输入中缓存命中 {{ run.usage.cached_tokens }}</p>
+      <p v-if="run.usage.usage_complete === false" role="status">部分调用用量尚未确认，以上为已知用量。</p>
 
       <section v-if="run.task" class="detail-section assignment-detail">
         <h3>这次怎么分工</h3>
@@ -119,6 +136,26 @@ function artifactTitle(subtaskId: string): string {
             <small v-if="subtask.skill_ids?.length">会用到：{{ subtask.skill_ids.map(skillLabel).join('、') }}</small>
           </el-timeline-item>
         </el-timeline>
+      </section>
+
+      <section v-if="run.agent_interactions?.length" class="detail-section">
+        <h3>成员协作记录</h3>
+        <el-table :data="run.agent_interactions" row-key="interaction_id" size="small">
+          <el-table-column label="协作内容" min-width="130">
+            <template #default="scope">
+              {{ interactionLabels[scope.row.kind as AgentInteraction['kind']] }}
+            </template>
+          </el-table-column>
+          <el-table-column label="发送方 → 接收方" min-width="190">
+            <template #default="scope">
+              {{ agentName(scope.row.sender) }} → {{ agentName(scope.row.recipient) }}
+            </template>
+          </el-table-column>
+          <el-table-column label="任务" min-width="130">
+            <template #default="scope">{{ artifactTitle(scope.row.subtask_id) }}</template>
+          </el-table-column>
+          <el-table-column prop="artifact_version" label="产物版本" width="90" />
+        </el-table>
       </section>
 
       <section v-if="run.artifacts.length" class="detail-section">

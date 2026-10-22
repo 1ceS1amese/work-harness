@@ -38,6 +38,7 @@ const props = defineProps<{
   sending: boolean
   hasActiveRun: boolean
   skills: SkillDescriptor[]
+  blackboardMode?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -74,6 +75,10 @@ function toggleAgent(agentId: string): void {
 }
 
 function toggleFunction(agentId: string, functionId: AgentFunction): void {
+  if (props.blackboardMode) {
+    functionsByAgent.value = { ...functionsByAgent.value, [agentId]: [functionId] }
+    return
+  }
   const active = functionsByAgent.value[agentId] ?? []
   const next = active.includes(functionId)
     ? active.filter((item) => item !== functionId)
@@ -108,6 +113,7 @@ function setSkillProvider(skillId: string, provider: string): void {
 <template>
   <footer class="composer-wrap">
     <div class="composer">
+      <slot name="execution" />
       <div class="assignment-strip">
         <span class="assignment-label"><UserFilled /> 这次一起做</span>
         <button
@@ -133,6 +139,7 @@ function setSkillProvider(skillId: string, provider: string): void {
                 <p>点一下就能加入。选好后，还可以告诉每个人更适合做哪部分。</p>
               </div>
               <el-switch
+                v-if="!blackboardMode"
                 v-model="crossReview"
                 inline-prompt
                 active-text="互审"
@@ -268,6 +275,10 @@ function setSkillProvider(skillId: string, provider: string): void {
         </div>
       </div>
     </div>
-    <p class="disclaimer">群里的 AI 成员能力相同，你只是在告诉他们这次各自重点做什么。</p>
+    <p class="disclaimer">
+      {{ blackboardMode
+        ? '成员围绕共享黑板协作，下一步由已有事实、待探索方向和提示决定。'
+        : '群里的 AI 成员能力相同，你只是在告诉他们这次各自重点做什么。' }}
+    </p>
   </footer>
 </template>

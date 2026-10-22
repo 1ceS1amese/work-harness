@@ -1,5 +1,13 @@
 schema_version: 1
+workflow:
+  engine: blackboard
+  accept_new_blackboard_runs: true
+  blackboard:
+    path: var/blackboard.sqlite
+    agent_roles: [worker-01]
 run_max_concurrency: 4
+run_queue_capacity: 8
+run_queue_retry_after_seconds: 5
 worker_max_concurrency: 4
 reviewer_max_concurrency: 3
 review_strategy: adaptive
@@ -10,8 +18,6 @@ max_repair_rounds: 1
 max_node_steps: 10
 node_timeout_seconds: 60
 run_timeout_seconds: 300
-token_budget: 50000
-cost_budget_usd: 5.0
 max_artifact_chars: 20000
 max_tool_result_chars: 8000
 tool_cache_max_entries: 256

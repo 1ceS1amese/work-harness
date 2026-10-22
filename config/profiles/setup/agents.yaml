@@ -1,0 +1,10 @@
+# Per-call output length only. Input tokens and cumulative usage do not reduce this limit.
+agents:
+  worker-01:
+    max_output_tokens: 20000
+  worker-02:
+    max_output_tokens: 20000
+  worker-03:
+    max_output_tokens: 20000
+  worker-04:
+    max_output_tokens: 20000

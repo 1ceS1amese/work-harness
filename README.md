@@ -1,334 +1,368 @@
-# Work Harness
+<a id="readme-top"></a>
 
-**Language / 语言:** English | [简体中文](README.zh-CN.md)
+<div align="center">
+  <h1>Work Harness</h1>
+  <p>Multi-agent collaboration around a shared blackboard, built with LangGraph.</p>
+  <p>
+    <a href="docs/blackboard-design.md"><strong>Explore the architecture »</strong></a>
+    <br /><br />
+    <a href="#getting-started">Quick Start</a>
+    &middot;
+    <a href="https://github.com/1ceS1amese/work-harness/issues/new?template=bug.yml">Report Bug</a>
+    &middot;
+    <a href="https://github.com/1ceS1amese/work-harness/issues/new?template=feature.yml">Request Feature</a>
+  </p>
+</div>
 
-[![CI](https://github.com/1ceS1amese/work-harness/actions/workflows/ci.yml/badge.svg)](https://github.com/1ceS1amese/work-harness/actions/workflows/ci.yml)
-[![GitHub Release](https://img.shields.io/github/v/release/1ceS1amese/work-harness?display_name=tag&sort=semver)](https://github.com/1ceS1amese/work-harness/releases/latest)
-[![standard-readme compliant](https://img.shields.io/badge/readme%20style-standard-brightgreen.svg?style=flat-square)](https://github.com/RichardLitt/standard-readme)
-[![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg?style=flat-square)](LICENSE)
-[![python: 3.11+](https://img.shields.io/badge/python-3.11%2B-3776AB.svg?style=flat-square)](pyproject.toml)
+[![CI][ci-shield]][ci-url]
+[![Python][python-shield]][python-url]
+[![License: MIT][license-shield]][license-url]
+[![Status: Alpha][status-shield]][status-url]
 
-A controlled, observable, and testable multi-agent workflow harness.
+**English** | [简体中文](README.zh-CN.md)
 
-Work Harness combines a bounded LangGraph workflow, a FastAPI API, and a Vue workbench for
-planning, parallel execution, independent review, repair, human approval, and synthesis. Its
-Provider layer targets custom OpenAI-compatible model endpoints rather than a single vendor.
-OpenAI protocol and DeepSeek dialects can use either Chat Completions or Responses, while the
-root agent and every assignable child agent can have independent Provider and model routes.
+<details>
+  <summary>Table of Contents</summary>
+  <ol>
+    <li><a href="#about-the-project">About the Project</a>
+      <ul><li><a href="#built-with">Built With</a></li></ul>
+    </li>
+    <li><a href="#getting-started">Getting Started</a>
+      <ul>
+        <li><a href="#prerequisites">Prerequisites</a></li>
+        <li><a href="#installation">Installation</a></li>
+        <li><a href="#other-deployment-options">Other Deployment Options</a></li>
+      </ul>
+    </li>
+    <li><a href="#usage">Usage</a>
+      <ul>
+        <li><a href="#web-workbench">Web Workbench</a></li>
+        <li><a href="#command-line">Command Line</a></li>
+        <li><a href="#http-api">HTTP API</a></li>
+        <li><a href="#token-accounting">Token Accounting</a></li>
+      </ul>
+    </li>
+    <li><a href="#roadmap">Roadmap and Current Status</a></li>
+    <li><a href="#contributing">Contributing</a></li>
+    <li><a href="#license">License</a></li>
+    <li><a href="#contact">Contact</a></li>
+    <li><a href="#acknowledgments">Acknowledgments</a></li>
+  </ol>
+</details>
 
-The current release supports hardened single-instance production deployment and manual real-model
-evaluation. Its SQLite storage and shared deployment API key deliberately do not provide
-multi-tenant identity or horizontal scaling.
+## About the Project
 
-## Table of Contents
+Work Harness is a framework and workbench for running, inspecting, and recovering multi-agent tasks.
+Each run owns a shared blackboard and a root goal. Knowledge sources read committed state and
+propose new information; a LangGraph controller chooses the next eligible sources from the remaining
+goal gaps. The execution path grows from what is on the board instead of requiring a complete task
+plan up front.
 
-- [Security](#security)
-- [Background](#background)
-- [Install](#install)
-- [Usage](#usage)
-- [Architecture](#architecture)
-- [Provider and Skill Compatibility](#provider-and-skill-compatibility)
-- [Deployment](#deployment)
-- [Project Status](#project-status)
-- [API](#api)
-- [Acknowledgements](#acknowledgements)
-- [Contributing](#contributing)
-- [License](#license)
+The blackboard contains only three kinds of knowledge objects:
 
-## Security
+| Object | Meaning | Role in collaboration |
+| --- | --- | --- |
+| **Fact** | A claim confirmed within its stated scope | Supplies evidence for subsequent work and acceptance checks |
+| **Intent** | A goal or direction still to explore | Records acceptance criteria and unresolved work |
+| **Hint** | Experience, a hypothesis, or a suggestion | Guides exploration without being treated as confirmed evidence |
 
-Never place model credentials in YAML, frontend build variables, or logs. A Provider can read its
-key from a named environment variable, or accept it through the authenticated settings UI. UI
-keys are encrypted before SQLite persistence with a separate `providers.sqlite.key` file and are
-never returned by the API. Use `secure` or `production` with HTTPS before exposing the service
-outside a trusted machine, and protect both the data volume and backups.
+Independent knowledge sources may use rules, observations, verification logic, or private LangGraph
+Agent subgraphs. They exchange versioned board objects; private model conversations remain inside
+those subgraphs. The kernel checks evidence, provenance, conflicts, and object validity before
+accepting changes.
 
-The built-in API Key is a shared deployment secret, not user identity or tenant isolation.
-SQLite is supported for one application process only. See [SECURITY.md](SECURITY.md) for the
-supported versions, private reporting process, and deployment boundary.
+Current capabilities include:
 
-## Background
+- **State-driven collaboration:** bounded parallel activation, per-Intent concurrency, retries,
+  timeouts, human input, and explicit completion criteria.
+- **Inspectable execution:** goal gaps, object history, evidence, attachments, a knowledge graph,
+  live run updates, and durable blackboard event queries.
+- **Recovery:** SQLite for one application process, or PostgreSQL with separate API and Worker
+  processes, durable jobs, leases, cancellation, and failure recovery.
+- **Configurable models:** custom OpenAI-compatible endpoints, Chat Completions and Responses,
+  the DeepSeek protocol dialect, per-Agent routing, prompts, Tools, and Skills.
+- **Legacy compatibility:** the previous planning, execution, review, and synthesis workflow
+  remains available through `engine=legacy`.
 
-Multi-agent systems often bind workflow nodes directly to vendor SDKs, model names, tools, and
-process-local state. That makes providers difficult to swap and makes partial failures hard to
-inspect or recover. Work Harness separates those concerns:
+New runs default to **`blackboard`**. The built-in product catalog currently explores candidate drafts
+and verifies their storage. Domain-specific truth or business actions need matching Tools and
+verifiers; model confidence alone does not establish a Fact.
 
-- LangGraph owns bounded workflow transitions.
-- Pydantic models define machine-readable contracts.
-- logical models keep workflow roles independent from vendor model IDs.
-- Provider and Tool registries support adapters and Python entry points.
-- Skills declare capabilities, tools, compatible Providers, and preferred routes.
-- Checkpoint, RunStore, and ProviderStore own distinct persistent state.
+### Built With
 
-The default Mock Providers are deterministic engineering fixtures. Passing the included
-evaluation proves workflow behavior, not real-model answer quality.
+| Layer | Technology |
+| --- | --- |
+| Agent execution | Python, LangGraph |
+| API and contracts | FastAPI, Pydantic |
+| Workbench | Vue 3, TypeScript, Vite, Element Plus |
+| Persistence | SQLite, PostgreSQL, LangGraph checkpoints |
+| Desktop packaging | pywebview, PyInstaller, Windows WebView2 |
+| Verification | pytest, Vitest, Ruff, GitHub Actions |
 
-## Install
+See the [blackboard design](docs/blackboard-design.md),
+[persistence contract](docs/persistence.md), and [legacy Agent design](docs/multi-agent-design.md)
+for implementation details.
 
-### Dependencies
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
 
-For the recommended container installation, install Docker Engine 24+ and Docker Compose v2.24+.
-For source development, install Python 3.11+, [uv](https://docs.astral.sh/uv/), Node.js 22+, and
-npm.
+## Getting Started
 
-### Windows executable
+### Prerequisites
 
-Download `work-harness.exe` and its `.sha256` file from the
-[latest GitHub Release](https://github.com/1ceS1amese/work-harness/releases/latest), verify the
-hash, and double-click the executable. It contains the backend, browser UI, built-in configuration,
-prompts, schemas, and Skills; Python and Node.js are not required on the target machine.
+For the current source version, install Python **3.11+**, [uv](https://docs.astral.sh/uv/),
+Node.js **22+**, npm, and Git. Model-backed tasks also need a compatible endpoint, credential, and
+model ID supporting chat, structured output, and tool calling.
 
-The desktop launcher listens only on `127.0.0.1`, opens the browser automatically, and persists
-checkpoints, runs, and Provider Profiles under `%LOCALAPPDATA%\WorkHarness`. Pass a CLI command such
-as `work-harness.exe check-config` to use it without the desktop launcher. See the
-[Windows executable guide](docs/windows-executable.md) for verification, model environment
-variables, custom data paths, and source builds.
+The default `setup` profile starts in configuration mode until a real model service is configured.
+Deterministic Mock Providers are available only through the explicit `local` development profile;
+they are fixtures for engineering checks.
 
-### Docker Compose
+### Installation
 
-From a repository checkout:
+Clone the project and install the locked dependencies:
 
 ```bash
-./scripts/compose.sh up
-```
-
-This builds both applications, creates the persistent volume, starts one non-root application
-container, and waits for the liveness probe. No key is needed for the default Mock profile.
-
-To deploy a versioned image from the repository's GitHub Packages page, set its complete GHCR
-reference as `WORK_HARNESS_IMAGE` in `.env`, then run:
-
-```bash
-./scripts/compose.sh install
-```
-
-`install` pulls the declared image and refuses the default local-only tag. It does not build from
-the checkout.
-
-### Source
-
-```bash
-uv sync --extra dev --locked
+git clone https://github.com/1ceS1amese/work-harness.git
+cd work-harness
+uv sync --locked --extra dev
 npm --prefix frontend ci
 npm --prefix frontend run build
 uv run work-harness check-config
-uv run work-harness serve
+uv run work-harness serve --host 127.0.0.1 --port 8000
 ```
 
-### GitHub Release wheel
+Open [the local workbench](http://127.0.0.1:8000/), then:
 
-Release wheels contain the backend and built-in runtime configuration, prompts, schemas, and
-Skills. Download the wheel from the [latest GitHub Release](https://github.com/1ceS1amese/work-harness/releases/latest).
-The browser UI is distributed in the container image and source checkout.
+1. Go to **Settings → Models** and configure your Provider endpoint, credential, and model ID.
+   Choose the API family and structured-output mode supported by your service.
+2. Assign the model to the default group or individual Agents, then save.
+3. Restart the service to apply staged settings. Model readiness and task admission remain
+   unavailable until configuration is usable.
+4. Create a conversation, enter a goal, and explicitly select a completion criterion.
+
+Embedded settings and run data live under `var/` by default. UI-managed credentials are encrypted
+in the Provider store; its separate key file is needed for restoration. The
+[environment example](.env.example) documents environment-based setup. Source CLI commands do not
+automatically load `.env`; export the variables into the process when using that configuration path.
+
+### Other Deployment Options
+
+**Docker Compose — one application process:**
 
 ```bash
-python -m pip install work_harness-0.2.2-py3-none-any.whl
-work-harness check-config
-work-harness serve --host 127.0.0.1 --port 8000
+./scripts/compose.sh up
+# Configure the model in the workbench, then apply the saved settings.
+./scripts/compose.sh reload
 ```
+
+**PostgreSQL — separate API and Workers:**
+
+```bash
+./scripts/compose.sh init-distributed
+# Fill in .env.distributed and deploy/runtime.distributed.env before starting.
+./scripts/compose.sh distributed
+./scripts/compose.sh scale-workers 3
+```
+
+Distributed instances require matching configuration. Provider, prompt, and runtime edits through
+the settings UI are disabled in this mode. SQLite is limited to one application process; use
+PostgreSQL for multiple execution Workers. See the [deployment guide](docs/docker-deployment.md)
+for requirements, HTTPS, backups, restoration, and rollback.
+
+**Windows desktop and Python wheel:** packaging workflows are included. Consult the
+[release page](https://github.com/1ceS1amese/work-harness/releases) for version-specific artifacts.
+The desktop application targets Windows 10/11 x64 with WebView2; the wheel contains the
+backend and bundled configuration, without the workbench frontend. Follow the
+[Windows guide](docs/windows-executable.md) and the notes for the selected release. Current source
+changes do not imply that an existing EXE or image contains them.
+
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
 
 ## Usage
 
-Open `http://127.0.0.1:8000/` after a source or Compose installation. Create a conversation,
-choose allocation mode and Skills, optionally route individual agents, and submit a task. Runs
-stream snapshots over SSE and fall back to bounded polling after a connection failure.
+### Web Workbench
 
-### CLI
+Choose a goal, completion criteria, and any relevant Skills or Agent assignments. Open the run
+details to inspect remaining goal gaps, confirmed facts, exploration directions, hints, and their
+relationships. Human input is attached to the relevant Intent and board version.
+
+The built-in **saved candidate draft** criterion verifies that content was saved and can be read.
+It does **not** certify factual accuracy, answer quality, or completion of an external action.
+A free-text goal is never silently converted into that weaker acceptance condition.
+
+Settings are available at `/settings?section=models`, `/settings?section=prompts`, and
+`/settings?section=runtime`. Some prompt and review controls apply to the legacy workflow; blackboard
+Agents retain their own private execution logic.
+
+### Command Line
+
+With a model configured:
 
 ```bash
-# Validate all cross-references.
-uv run work-harness check-config
+# Default blackboard engine; explicitly accept a stored candidate draft.
+uv run work-harness run \
+  --goal "Draft a project introduction" --acceptance-template saved-draft
 
-# Inspect Provider, Tool, and Skill compatibility.
+# Explicitly select the legacy planning/review workflow.
+uv run work-harness run --engine legacy --goal "Review this delivery plan"
+
+# Inspect configuration and extension contracts.
 uv run work-harness check-compatibility
-
-# List or validate installed Skills.
 uv run work-harness skills list
 uv run work-harness skills validate
-
-# Run one task and optionally pin a Skill to a Provider.
-uv run work-harness run \
-  --goal "Audit this delivery plan" \
-  --skill risk-audit@mock-secondary
-
-# Run the deterministic workflow evaluation.
-uv run work-harness eval
 ```
 
-When using an installed wheel, omit `uv run`. Use `--project-root PATH` to load a custom project
-instead of the packaged defaults.
+For custom acceptance, use `--blackboard-spec goal.json`; the file must contain `topic` and typed
+`acceptance` criteria supported by the registered knowledge sources. See the
+[task contract](src/work_harness/domain/models.py) and [blackboard design](docs/blackboard-design.md).
+CLI task execution uses embedded mode; submit distributed runs through the API.
 
-### Custom Providers
-
-Provider settings can be staged in the web UI with either credential channel:
-
-1. choose `openai` or `deepseek` protocol behavior;
-2. choose `chat_completions` or `responses`;
-3. allowlist real model IDs;
-4. map logical models, the main coordination group, and individual `worker-*` agents;
-5. choose environment injection and reference an API Key variable, or choose encrypted UI storage
-   and enter the key once;
-6. enable the Profile and restart the service.
-
-Environment injection remains the recommended channel for automated secret managers. UI storage
-is useful for interactive installations: the browser sends the key only on save, a blank field
-keeps the existing value, and reads expose only `credential_configured`.
-
-The `main` agent binding expands to the normalizer, planner, reviewer, judge, and synthesizer.
-Specific child-agent bindings override the logical model's default route. A task-level Skill
-Provider pin has the highest priority.
-
-## Architecture
-
-```mermaid
-flowchart LR
-    UI[Vue workbench] --> API[FastAPI API]
-    API --> RM[RunManager]
-    RM --> WF[LangGraph workflow]
-    WF --> MG[ModelGateway]
-    MG --> PA[Provider adapters]
-    WF --> TG[ToolGateway]
-    WF --> SK[Skill registry]
-    WF --> CP[Checkpoint]
-    RM --> RS[RunStore]
-    PA --> PS[ProviderStore]
-```
-
-The workflow is:
-
-```text
-Normalize → Plan → Worker → Validate → Review → Judge
-          → Repair / Human Gate → Synthesize
-```
-
-Four homogeneous workers share the same contracts, budgets, and tool permissions. Their behavior
-changes through per-task functions and routes, not permanent professions. See the
-[architecture decisions](docs/architecture_decisions.md), [persistence contract](docs/persistence.md),
-and [security boundary](docs/security_boundary.md). Backend scheduling, adaptive review, and the
-repeatable benchmark are documented in [backend performance](docs/backend-performance.md).
-
-## Provider and Skill Compatibility
-
-Every enabled Provider must satisfy the same portable capability baseline:
-
-```text
-chat + structured_output + tool_calling
-```
-
-Startup fails closed when Provider declarations, adapter behavior, logical routes, or Skill
-requirements disagree. The built-in adapter supports:
-
-| Protocol behavior | API family | Endpoint suffix |
-| --- | --- | --- |
-| OpenAI-compatible | Chat Completions | `/chat/completions` |
-| OpenAI-compatible | Responses | `/responses` |
-| DeepSeek dialect | Chat Completions | `/chat/completions` |
-| DeepSeek dialect | Responses | `/responses` when supplied by the custom endpoint |
-
-`openai_compatible` describes a wire-protocol adapter, not an OpenAI-hosted service. Endpoint,
-model, and credential variables are user-defined. See
-[Provider, Tool, and Skill compatibility](docs/provider-skill-compatibility.md).
-
-## Deployment
-
-The Compose deployment intentionally runs one application instance because Checkpoint, RunStore,
-and ProviderStore currently use SQLite.
+For an offline smoke run with deterministic fixtures, use this POSIX-shell command:
 
 ```bash
-./scripts/compose.sh status
-./scripts/compose.sh logs
-./scripts/compose.sh backup
-./scripts/compose.sh reload
-./scripts/compose.sh update
-./scripts/compose.sh install
-./scripts/compose.sh down
+WORK_HARNESS_PROFILE=local uv run work-harness run \
+  --goal "Exercise the blackboard contract" --acceptance-template saved-draft
 ```
 
-For a source-based HTTPS production deployment, generate the private configuration templates,
-replace the deployment key and domain, then start the stack:
+Mock completion verifies the execution contract, not real-model quality. A dedicated development
+checkout avoids mixing fixture runs with existing Provider overrides or application data.
 
-```bash
-./scripts/compose.sh init-production
-# edit .env and deploy/runtime.env
-./scripts/compose.sh production
-./scripts/compose.sh ready
-```
+### HTTP API
 
-Use `./scripts/compose.sh install-production` instead when `WORK_HARNESS_IMAGE` points to a released
-GHCR image. Model variables in `deploy/runtime.env` are optional: after the service starts in
-configuration mode, an administrator can save an encrypted Provider key in the settings page and
-restart with `./scripts/compose.sh reload`.
-
-Production commands refuse the local profile, an example domain, weak deployment keys, or a
-partially configured environment Provider. Read the complete
-[Docker Compose deployment guide](docs/docker-deployment.md) before exposing a host. Do not use
-`docker compose down -v` unless you explicitly intend to delete durable state.
-
-## Project Status
-
-The current source tree provides:
-
-- 71 backend tests and 15 frontend tests;
-- adaptive review that keeps three-dimensional checks for high-risk work while reducing the
-  deterministic low-risk workflow from 11 to 7 model calls;
-- event-driven SSE snapshots, bounded run/Provider concurrency, and run-scoped idempotent Tool
-  caching;
-- a 10/10 deterministic Mock workflow evaluation;
-- durable Provider Profiles, encrypted interactive credentials, environment-injected credentials,
-  and per-agent model routes;
-- single-instance restart recovery with leases and heartbeats;
-- a read-only workspace Tool and two executable example Skills;
-- a self-contained Windows x64 executable with external durable state;
-- production-validated Compose deployment, Caddy HTTPS and security headers, liveness/readiness
-  separation, resource limits, and consistent SQLite plus credential-key backups.
-
-Real-provider credentials are intentionally not included. Multi-instance storage, a reliable task
-queue, server-side conversations, organization identity, and business Tools remain future work.
-See [development status](docs/development-status.md) and [CHANGELOG.md](CHANGELOG.md).
-
-## API
-
-| Method | Path | Purpose |
-| --- | --- | --- |
-| `GET` | `/health/live` | Unauthenticated process liveness |
-| `GET` | `/health` | Provider and storage readiness summary |
-| `GET` | `/health/ready` | Deployment readiness; returns 503 until enabled Providers are usable |
-| `GET` | `/v1/capabilities` | Agents, functions, models, Tools, and Skills |
-| `GET` | `/v1/compatibility` | Provider, adapter, Tool, and Skill report |
-| `GET` | `/v1/providers` | Effective and persisted Provider Profiles |
-| `PUT` | `/v1/providers/{name}` | Validate and stage a Provider Profile |
-| `DELETE` | `/v1/providers/{name}` | Delete a persistent Provider override |
-| `POST` | `/v1/runs` | Create or idempotently reuse a run |
-| `GET` | `/v1/runs` | List durable run summaries |
-| `GET` | `/v1/runs/{run_id}` | Read a complete run result |
-| `GET` | `/v1/runs/{run_id}/events` | Stream run snapshots using SSE |
-| `POST` | `/v1/runs/{run_id}/resume` | Resolve a human approval gate |
-| `DELETE` | `/v1/runs/{run_id}` | Cancel a run |
+Submit a run with explicit acceptance criteria:
 
 ```bash
 curl --request POST http://127.0.0.1:8000/v1/runs \
   --header 'Content-Type: application/json' \
-  --data '{"goal":"Create a bounded implementation plan","task_type":"planning"}'
+  --data '{
+    "goal": "Draft a project introduction",
+    "blackboard": {
+      "topic": "document",
+      "acceptance": [{
+        "id": "saved-draft",
+        "description": "Save a readable candidate draft; accuracy is not verified",
+        "claim_key": "draft.content",
+        "claim_type": "delivery",
+        "scope": {"verification": "stored_content_only"},
+        "required_checks": ["content_stored"]
+      }]
+    }
+  }'
 ```
 
-Interactive OpenAPI documentation is available at `/docs` when enabled by the selected profile.
+The response contains a `run_id`. The example uses the default local configuration; authenticated
+deployments also require the deployment API key.
 
-## Acknowledgements
+| Method | Endpoint | Purpose |
+| --- | --- | --- |
+| `GET` | `/health/live` · `/health/ready` | Process liveness and deployment readiness |
+| `GET` | `/v1/capabilities` | Available Agents, Tools, Skills, engine defaults, and acceptance templates |
+| `POST` | `/v1/runs` | Submit a run; supports an idempotency key |
+| `GET` | `/v1/runs/{run_id}` | Status, output, and recorded usage |
+| `GET` | `/v1/runs/{run_id}/events` | Run updates over SSE |
+| `GET` | `/v1/runs/{run_id}/blackboard` | Board summary and goal gaps |
+| `GET` | `/v1/runs/{run_id}/blackboard/objects` | Objects at a selected board revision |
+| `GET` | `/v1/runs/{run_id}/blackboard/events` | Durable blackboard event history |
+| `POST` | `/v1/runs/{run_id}/inputs` | Versioned human input for a blackboard Intent |
+| `DELETE` | `/v1/runs/{run_id}` | Cancel a run |
 
-Work Harness is built with [FastAPI](https://fastapi.tiangolo.com/),
-[LangGraph](https://github.com/langchain-ai/langgraph), [Pydantic](https://docs.pydantic.dev/),
-[Vue](https://vuejs.org/), and [Element Plus](https://element-plus.org/). Its README follows
-[Standard Readme](https://github.com/RichardLitt/standard-readme).
+Interactive API documentation is available at `/docs` when enabled by the selected profile.
+
+### Token Accounting
+
+Input, output, and cached-input tokens are recorded separately. Cached tokens are already part of
+input tokens, so the total is **input + output**. Missing or incomplete usage stays explicitly
+unconfirmed; duplicate receipts and recovery do not count the same call twice.
+
+There is no cumulative Token or monetary allowance blocking execution. `max_output_tokens` controls
+only the length of one model response. Timeouts, execution steps, activation counts, retries, and
+concurrency limits still bound the work. See [Agent configuration](config/agents.yaml) and
+[runtime configuration](config/runtime.yaml).
+
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
+
+## Roadmap
+
+**Current source status — 2026-10-22:** the blackboard core, bounded parallel controller, web/API/CLI
+entry points, knowledge graph, human input, SQLite/PostgreSQL recovery, backup/rollback paths, and
+default-engine switch are implemented. Token accounting has been separated from spending limits.
+The detailed implementation record remains in the [existing design plan](docs/blackboard-design.md).
+
+Source validation covers SQLite and real PostgreSQL 16 API/Worker execution. Backend regression and
+follow-up checks cover accounting, failures, recovery, and compatibility; the latest recorded frontend
+suite has **57 passing tests**, with type checking and a production build completed. A historical
+six-task comparison with `gpt-5.6-sol` passed **6/6** tasks on blackboard and **1/6** on legacy. That is a
+limited benchmark, not a general quality claim, and it predates the latest Token refactor. See the
+[development record](docs/development-status.md) for dates, test runs, and evaluation scope.
+
+Remaining work includes:
+
+- Rebuilding and validating Windows release artifacts and repeating container restore checks for
+  the current source revision.
+- Broader real-task evaluation, business Tools, domain verifiers, and reusable experience across runs.
+- Server-side conversation synchronization, user identity, and tenant isolation.
+- Shared editable Provider and application settings for distributed deployments.
+
+Existing runs retain their engine and execution identity. Resuming a historical run requires the
+matching execution version and configuration. To stop admitting new blackboard runs, set
+`WORK_HARNESS_WORKFLOW_ENGINE=legacy` and `WORK_HARNESS_ACCEPT_NEW_BLACKBOARD_RUNS=false`, then restart
+all application instances consistently. This does not migrate old checkpoints.
+
+The deployment API key is a shared service credential, not a user or tenant boundary. See
+[SECURITY.md](SECURITY.md) and the [distributed queue contract](docs/distributed-run-queue.md) before
+expanding a deployment. Proposed features and known issues belong in
+[GitHub Issues](https://github.com/1ceS1amese/work-harness/issues).
+
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
 
 ## Contributing
 
-Questions, bug reports, and focused pull requests are welcome. Read
-[CONTRIBUTING.md](CONTRIBUTING.md) before starting, use the repository's issue templates, and
-follow [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md). Security reports must use the private process in
-[SECURITY.md](SECURITY.md).
+Read [CONTRIBUTING.md](CONTRIBUTING.md) and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md). Open an issue for a
+substantial change, create a focused branch or fork, and submit a pull request with the behavior
+change and relevant validation. Keep English and Chinese README content aligned.
 
-By contributing, you agree that your contribution is licensed under the MIT License.
+Common development checks:
+
+```bash
+uv run ruff check src tests scripts
+uv run pytest
+npm --prefix frontend run type-check
+npm --prefix frontend test
+npm --prefix frontend run build
+```
+
+PostgreSQL tests require `WORK_HARNESS_TEST_DATABASE_URL` pointing to a dedicated test database;
+they skip when it is absent. The [contribution guide](CONTRIBUTING.md) covers database, packaging,
+and deployment checks. Report vulnerabilities through the private process in [SECURITY.md](SECURITY.md).
+
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
 
 ## License
 
-[MIT](LICENSE) © 2026 Work Harness contributors
+Distributed under the [MIT License](LICENSE). Copyright © 2026 Work Harness contributors.
+
+## Contact
+
+- Project: [1ceS1amese/work-harness](https://github.com/1ceS1amese/work-harness)
+- Questions and feedback: [issue templates](https://github.com/1ceS1amese/work-harness/issues/new/choose)
+- Changes and releases: [CHANGELOG.md](CHANGELOG.md) · [GitHub Releases](https://github.com/1ceS1amese/work-harness/releases)
+
+## Acknowledgments
+
+- [Best-README-Template](https://github.com/othneildrew/Best-README-Template) for the README structure.
+- [LangGraph](https://github.com/langchain-ai/langgraph), [FastAPI](https://fastapi.tiangolo.com/), and
+  [Pydantic](https://docs.pydantic.dev/) for the execution and API foundations.
+- [Vue](https://vuejs.org/), [Element Plus](https://element-plus.org/),
+  [pywebview](https://pywebview.flowrl.com/), and [PyInstaller](https://pyinstaller.org/) for the workbench
+  and desktop tooling.
+
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
+
+[ci-shield]: https://github.com/1ceS1amese/work-harness/actions/workflows/ci.yml/badge.svg
+[ci-url]: https://github.com/1ceS1amese/work-harness/actions/workflows/ci.yml
+[python-shield]: https://img.shields.io/badge/Python-3.11%2B-3776AB?style=flat-square&logo=python&logoColor=white
+[python-url]: pyproject.toml
+[license-shield]: https://img.shields.io/badge/License-MIT-blue?style=flat-square
+[license-url]: LICENSE
+[status-shield]: https://img.shields.io/badge/Status-Alpha-orange?style=flat-square
+[status-url]: docs/development-status.md

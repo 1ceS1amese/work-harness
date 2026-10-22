@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Literal
 from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from work_harness.blackboard.models import AcceptanceCriterion, ObjectRef
 from work_harness.domain.enums import (
     AgentFunction,
     AllocationMode,
@@ -129,6 +130,30 @@ class SkillSelection(ContractModel):
     )
 
 
+class BlackboardTaskInput(ContractModel):
+    """User-supplied acceptance, kept separate from an Agent's proposed solution."""
+
+    topic: str = Field(default="task", min_length=1, max_length=500)
+    acceptance: tuple[AcceptanceCriterion, ...] = Field(min_length=1, max_length=100)
+
+    @field_validator("topic")
+    @classmethod
+    def validate_topic(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("blackboard topic cannot be blank")
+        if value == "user-input":
+            raise ValueError("user-input is reserved for the original request")
+        return value
+
+    @field_validator("acceptance")
+    @classmethod
+    def unique_criteria(cls, value: tuple[AcceptanceCriterion, ...]):
+        if len({item.id for item in value}) != len(value):
+            raise ValueError("acceptance criterion ids must be unique")
+        return value
+
+
 class TaskRequest(ContractModel):
     goal: str = Field(min_length=1, max_length=20_000)
     context: dict[str, Any] = Field(default_factory=dict)
@@ -139,6 +164,16 @@ class TaskRequest(ContractModel):
     assignment: AgentAssignment = Field(default_factory=AgentAssignment)
     skills: list[SkillSelection] = Field(default_factory=list, max_length=8)
     idempotency_key: str | None = Field(default=None, max_length=200)
+    engine: Literal["legacy", "blackboard"] | None = None
+    blackboard: BlackboardTaskInput | None = None
+
+    @model_validator(mode="after")
+    def validate_engine_input(self) -> TaskRequest:
+        if self.engine == "legacy" and self.blackboard is not None:
+            raise ValueError("legacy runs do not accept blackboard acceptance criteria")
+        if self.engine == "blackboard" and self.blackboard is None:
+            raise ValueError("blackboard runs require explicit acceptance criteria")
+        return self
 
     @field_validator("skills")
     @classmethod
@@ -174,8 +209,13 @@ class SubtaskSpec(ContractModel):
     allowed_tools: list[str] = Field(default_factory=list)
     skill_ids: list[str] = Field(default_factory=list, max_length=8)
     acceptance_criteria: list[str] = Field(min_length=1)
-    token_budget: int = Field(default=5_000, ge=1)
-    cost_budget_usd: float = Field(default=0.50, ge=0)
+    max_output_tokens: int = Field(
+        default=5_000,
+        ge=1,
+        validation_alias=AliasChoices("max_output_tokens", "token_budget"),
+        description="Maximum output tokens per model call.",
+    )
+    cost_budget_usd: float = Field(default=0, ge=0, deprecated=True)
 
     @field_validator("skill_ids")
     @classmethod
@@ -237,7 +277,9 @@ class Artifact(ContractModel):
     subtask_id: str
     producer: str
     version: int = Field(default=1, ge=1)
-    content: str = Field(min_length=1, max_length=50_000)
+    # The absolute contract ceiling matches RuntimeConfig's configurable
+    # ceiling; WorkerAgent applies the deployment's usually smaller limit.
+    content: str = Field(min_length=1, max_length=200_000)
     evidence: list[Evidence] = Field(default_factory=list)
     assumptions: list[str] = Field(default_factory=list)
     unresolved_questions: list[str] = Field(default_factory=list)
@@ -280,6 +322,7 @@ class Usage(ContractModel):
     input_tokens: int = Field(default=0, ge=0)
     output_tokens: int = Field(default=0, ge=0)
     cached_tokens: int = Field(default=0, ge=0)
+    usage_complete: bool = True
     estimated_cost_usd: float = Field(default=0, ge=0)
 
 
@@ -317,8 +360,13 @@ class ModelRequest(ContractModel):
     tools: list[dict[str, Any]] = Field(default_factory=list)
     response_schema: dict[str, Any] | None = None
     timeout_seconds: float = Field(default=60, gt=0)
-    token_budget: int = Field(default=4_000, ge=1)
-    cost_budget_usd: float = Field(default=1.0, ge=0)
+    max_output_tokens: int = Field(
+        default=4_000,
+        ge=1,
+        validation_alias=AliasChoices("max_output_tokens", "token_budget"),
+        description="Maximum output tokens per model call.",
+    )
+    cost_budget_usd: float = Field(default=0, ge=0, deprecated=True)
     risk_level: RiskLevel = RiskLevel.LOW
     metadata: dict[str, Any] = Field(default_factory=dict)
 
@@ -355,6 +403,7 @@ class ModelCallRecord(ContractModel):
     input_tokens: int = Field(default=0, ge=0)
     output_tokens: int = Field(default=0, ge=0)
     cached_tokens: int = Field(default=0, ge=0)
+    usage_complete: bool = True
     estimated_cost_usd: float = Field(default=0, ge=0)
     latency_ms: int = Field(default=0, ge=0)
     retries: int = Field(default=0, ge=0)
@@ -382,7 +431,23 @@ class RunError(ContractModel):
     occurred_at: datetime = Field(default_factory=utc_now)
 
 
+class AgentInteraction(ContractModel):
+    """Public provenance for completed Agent exchanges; contains no private messages."""
+
+    interaction_id: str
+    kind: Literal["assignment", "dependency", "repair", "result", "review"]
+    sender: str
+    recipient: str
+    subtask_id: str
+    artifact_id: str | None = None
+    artifact_version: int = Field(ge=1)
+    review_id: str | None = None
+    repair_round: int = Field(default=0, ge=0)
+
+
 class RunResult(ContractModel):
+    pending_intents: list[ObjectRef] = Field(default_factory=list)
+    engine: Literal["legacy", "blackboard"] = "legacy"
     run_id: str
     status: RunStatus
     output: str = ""
@@ -396,3 +461,4 @@ class RunResult(ContractModel):
     usage: Usage = Field(default_factory=Usage)
     model_calls: list[ModelCallRecord] = Field(default_factory=list)
     tool_calls: list[ToolCallRecord] = Field(default_factory=list)
+    agent_interactions: list[AgentInteraction] = Field(default_factory=list)

@@ -1,316 +1,372 @@
-# Work Harness
+<a id="readme-top"></a>
 
-**Language / 语言：** [English](README.md) | 简体中文
+<div align="center">
+  <h1>Work Harness</h1>
+  <p>基于 LangGraph，让多个 Agent 围绕共享黑板协作。</p>
+  <p>
+    <a href="docs/blackboard-design.md"><strong>阅读架构设计 »</strong></a>
+    <br /><br />
+    <a href="#getting-started">快速开始</a>
+    &middot;
+    <a href="https://github.com/1ceS1amese/work-harness/issues/new?template=bug.yml">报告问题</a>
+    &middot;
+    <a href="https://github.com/1ceS1amese/work-harness/issues/new?template=feature.yml">提出功能建议</a>
+  </p>
+</div>
 
-[![CI](https://github.com/1ceS1amese/work-harness/actions/workflows/ci.yml/badge.svg)](https://github.com/1ceS1amese/work-harness/actions/workflows/ci.yml)
-[![GitHub Release](https://img.shields.io/github/v/release/1ceS1amese/work-harness?display_name=tag&sort=semver)](https://github.com/1ceS1amese/work-harness/releases/latest)
-[![standard-readme compliant](https://img.shields.io/badge/readme%20style-standard-brightgreen.svg?style=flat-square)](https://github.com/RichardLitt/standard-readme)
-[![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg?style=flat-square)](LICENSE)
-[![python: 3.11+](https://img.shields.io/badge/python-3.11%2B-3776AB.svg?style=flat-square)](pyproject.toml)
+[![CI][ci-shield]][ci-url]
+[![Python][python-shield]][python-url]
+[![License: MIT][license-shield]][license-url]
+[![Status: Alpha][status-shield]][status-url]
 
-A controlled, observable, and testable multi-agent workflow harness.
+[English](README.md) | **简体中文**
 
-Work Harness 是一个受控、可观测、可测试的多 Agent 工作流框架。它组合了有边界的
-LangGraph 工作流、FastAPI API 与 Vue 工作台，可执行规划、并行任务、独立审查、修复、
-人工审批与最终汇总。
+<details>
+  <summary>目录</summary>
+  <ol>
+    <li><a href="#about-the-project">项目介绍</a>
+      <ul><li><a href="#built-with">技术栈</a></li></ul>
+    </li>
+    <li><a href="#getting-started">快速开始</a>
+      <ul>
+        <li><a href="#prerequisites">环境要求</a></li>
+        <li><a href="#installation">源码安装</a></li>
+        <li><a href="#other-deployment-options">其他部署方式</a></li>
+      </ul>
+    </li>
+    <li><a href="#usage">使用方式</a>
+      <ul>
+        <li><a href="#web-workbench">网页工作台</a></li>
+        <li><a href="#command-line">命令行</a></li>
+        <li><a href="#http-api">HTTP API</a></li>
+        <li><a href="#token-accounting">Token 记录</a></li>
+      </ul>
+    </li>
+    <li><a href="#roadmap">项目进度与后续方向</a></li>
+    <li><a href="#contributing">参与贡献</a></li>
+    <li><a href="#license">许可证</a></li>
+    <li><a href="#contact">联系与反馈</a></li>
+    <li><a href="#acknowledgments">致谢</a></li>
+  </ol>
+</details>
 
-Provider 层面向用户自定义的 OpenAI 协议端点，而不是绑定单一厂商。OpenAI 协议行为与
-DeepSeek 方言均可通过 Chat Completions 或 Responses 接入；主 Agent 与每个子 Agent 也可
-分别选择 Provider 和模型路由。
+<a id="about-the-project"></a>
 
-当前版本支持经过加固的单实例生产部署和手动真实模型验证。由于使用 SQLite 和部署级共享
-API Key，它有意不提供多租户身份体系与横向扩容能力。
+## 项目介绍
 
-## 目录
+Work Harness 是一个用于运行、查看和恢复多 Agent 任务的框架与工作台。每次运行拥有一块共享
+黑板和一个根目标。多个知识源读取已经提交的状态，提出新的信息；LangGraph 控制器根据目标
+缺口选择下一批可执行的知识源。系统如何向前推进，取决于黑板上已经留下了什么，无需预先
+编排完整的任务流程。
 
-- [安全](#安全)
-- [背景](#背景)
-- [安装](#安装)
-- [使用](#使用)
-- [架构](#架构)
-- [Provider 与 Skill 兼容性](#provider-与-skill-兼容性)
-- [部署](#部署)
-- [项目状态](#项目状态)
-- [API](#api)
-- [致谢](#致谢)
-- [贡献](#贡献)
-- [许可证](#许可证)
+黑板上只有三种知识对象：
 
-## 安全
+| 对象 | 含义 | 协作中的作用 |
+| --- | --- | --- |
+| **Fact** | 在明确范围内已确认的主张 | 为后续处理和目标验收提供依据 |
+| **Intent** | 尚待探索的目标或方向 | 记录验收条件与未解决的问题 |
+| **Hint** | 经验提示、假设或建议 | 引导探索，不直接作为已确认的事实 |
 
-不要把模型密钥写入 YAML、前端构建变量或日志。Provider 可以读取指定环境变量，也可以通过
-已认证的设置页面录入密钥。页面录入的密钥会使用独立的 `providers.sqlite.key` 加密后再写入
-SQLite，查询接口绝不回显。服务暴露到受信任主机之外前，请使用 `secure` 或 `production` 配置
-并启用 HTTPS，同时保护数据卷和备份。
+知识源可以采用规则、观察、验证逻辑或独立的 LangGraph Agent 子图。它们通过有版本的板面对象
+交换知识，私有模型对话保留在各自子图中。黑板内核在接受变更前检查证据、来源、冲突和对象
+有效性。
 
-内置 API Key 是部署级共享密钥，不代表用户身份或租户隔离。SQLite 仅支持单应用进程。
-完整边界和私密漏洞报告方式见 [SECURITY.md](SECURITY.md)。
+当前已具备：
 
-## 背景
+- **状态驱动协作：** 有界并行激活、按 Intent 分配并发名额、重试、超时、人工输入和明确验收。
+- **可查看的执行过程：** 目标缺口、对象历史、证据、附件、知识关系图、实时运行更新和持久事件查询。
+- **故障恢复：** 单应用进程使用 SQLite；API/Worker 分离时使用 PostgreSQL、持久队列和执行租约，
+  支持取消、故障接管与恢复。
+- **模型与能力配置：** 自定义 OpenAI 兼容端点、Chat Completions / Responses、DeepSeek 协议方言、
+  独立 Agent 路由、提示词、Tool 和 Skill。
+- **旧引擎兼容：** 通过 `engine=legacy` 显式使用原有的规划、执行、复核和汇总流程。
 
-多 Agent 系统经常把工作流节点直接绑定到厂商 SDK、固定模型、工具和进程内状态，导致
-Provider 难以替换、部分失败难以定位或恢复。Work Harness 将这些关注点拆开：
+新任务默认使用 **`blackboard`**。当前内置产品知识源围绕候选草稿的探索与存储验证工作；若要
+确认领域事实或业务操作，需要接入相应的 Tool 和验证器。模型自报置信度不能直接形成 Fact。
 
-- LangGraph 管理有边界的工作流跳转；
-- Pydantic 模型定义可机器校验的契约；
-- 逻辑模型使工作流角色与厂商模型 ID 解耦；
-- Provider 与 Tool 注册表支持适配器和 Python entry point；
-- Skill 声明能力、工具、兼容 Provider 和首选路由；
-- Checkpoint、RunStore 与 ProviderStore 分别管理不同的持久状态。
+<a id="built-with"></a>
 
-默认 Mock Provider 是确定性的工程测试夹具。内置评测通过仅证明流程行为满足基线，不代表
-真实模型的回答质量。
+### 技术栈
 
-## 安装
+| 层次 | 技术 |
+| --- | --- |
+| Agent 执行 | Python、LangGraph |
+| API 与数据契约 | FastAPI、Pydantic |
+| 网页工作台 | Vue 3、TypeScript、Vite、Element Plus |
+| 持久化 | SQLite、PostgreSQL、LangGraph Checkpoint |
+| 桌面打包 | pywebview、PyInstaller、Windows WebView2 |
+| 验证工具 | pytest、Vitest、Ruff、GitHub Actions |
 
-### 依赖
+实现细节见[黑板设计](docs/blackboard-design.md)、[持久化契约](docs/persistence.md)和
+[旧版多 Agent 设计](docs/multi-agent-design.md)。
 
-推荐使用 Docker Engine 24+ 和 Docker Compose v2.24+ 部署。源码开发需要 Python 3.11+、
-[uv](https://docs.astral.sh/uv/)、Node.js 22+ 与 npm。
+<p align="right">(<a href="#readme-top">返回顶部</a>)</p>
 
-### Windows 单文件版
+<a id="getting-started"></a>
 
-从[最新 GitHub Release](https://github.com/1ceS1amese/work-harness/releases/latest) 下载
-`work-harness.exe` 和对应 `.sha256` 文件，校验后双击即可。EXE 已包含后端、浏览器 UI、内置
-配置、Prompt、Schema 和 Skill，目标电脑无需安装 Python 或 Node.js。
+## 快速开始
 
-桌面启动器只监听 `127.0.0.1`，会自动打开浏览器，并把 Checkpoint、运行记录和 Provider
-Profile 持久化到 `%LOCALAPPDATA%\WorkHarness`。传入 `work-harness.exe check-config` 等命令时
-可直接使用 CLI。校验方式、模型环境变量、自定义数据目录和源码构建说明见
-[Windows 单文件版指南](docs/windows-executable.md)。
+<a id="prerequisites"></a>
 
-### Docker Compose
+### 环境要求
 
-在仓库检出目录运行：
+运行当前源码需要 Python **3.11+**、[uv](https://docs.astral.sh/uv/)、Node.js **22+**、npm 和 Git。
+使用真实模型还需要兼容服务的接口地址、凭据和模型名称，模型应支持聊天、结构化输出和工具调用。
 
-```bash
-./scripts/compose.sh up
-```
+默认 `setup` Profile 会在真实模型配置完成前保持配置模式。确定性的 Mock Provider 仅用于
+显式选择的 `local` 开发 Profile，供工程检查使用。
 
-该命令会构建前后端、创建持久化卷、启动非 root 单实例容器并等待存活检查。默认 Mock 配置
-无需任何模型密钥。
-
-如需部署仓库 GitHub Packages 页面中的版本化镜像，请把完整 GHCR 引用写入 `.env` 的
-`WORK_HARNESS_IMAGE`，然后运行：
-
-```bash
-./scripts/compose.sh install
-```
-
-`install` 会拒绝默认的本地标签，只拉取已声明镜像，不在当前检出目录构建。
+<a id="installation"></a>
 
 ### 源码安装
 
+克隆项目并安装锁定版本的依赖：
+
 ```bash
-uv sync --extra dev --locked
+git clone https://github.com/1ceS1amese/work-harness.git
+cd work-harness
+uv sync --locked --extra dev
 npm --prefix frontend ci
 npm --prefix frontend run build
 uv run work-harness check-config
-uv run work-harness serve
+uv run work-harness serve --host 127.0.0.1 --port 8000
 ```
 
-### GitHub Release wheel
+打开[本地工作台](http://127.0.0.1:8000/)，然后：
 
-发布 wheel 包含后端以及内置配置、Prompt、Schema 和 Skill，可从
-[最新 GitHub Release](https://github.com/1ceS1amese/work-harness/releases/latest) 下载。浏览器 UI
-通过容器镜像和源码分发。
+1. 进入“设置 → 模型设置”，填写 Provider 地址、凭据和模型名称，选择服务支持的 API 类型与
+   结构化输出模式。
+2. 为默认协调组或单独的 Agent 分配模型并保存。
+3. 重启服务，使暂存配置生效。模型配置可用前，就绪检查和任务提交保持不可用。
+4. 创建会话、填写目标，并明确选择完成条件。
+
+内嵌模式的设置和运行数据默认保存在 `var/` 下。页面提交的模型凭据在 Provider 存储中加密保存，
+恢复时需要配套的独立密钥文件。[环境变量示例](.env.example)列出了环境配置项。源码 CLI 不会
+自动加载 `.env`；使用环境配置时，需要将变量导出到启动进程。
+
+<a id="other-deployment-options"></a>
+
+### 其他部署方式
+
+**Docker Compose：单应用进程。**
 
 ```bash
-python -m pip install work_harness-0.2.2-py3-none-any.whl
-work-harness check-config
-work-harness serve --host 127.0.0.1 --port 8000
+./scripts/compose.sh up
+# 在工作台配置模型后，加载保存的设置。
+./scripts/compose.sh reload
 ```
 
-## 使用
-
-源码或 Compose 启动后访问 `http://127.0.0.1:8000/`。创建会话、选择分配模式和 Skill，按需为
-单个 Agent 指定路由，然后提交任务。运行状态通过 SSE 推送；连接失败后会退回有边界的轮询。
-
-### CLI
+**PostgreSQL：独立 API 与 Worker。**
 
 ```bash
-# 校验全部配置引用。
-uv run work-harness check-config
+./scripts/compose.sh init-distributed
+# 启动前填写 .env.distributed 和 deploy/runtime.distributed.env。
+./scripts/compose.sh distributed
+./scripts/compose.sh scale-workers 3
+```
 
-# 检查 Provider、Tool 与 Skill 兼容性。
+分布式实例必须使用一致的配置，该模式暂不允许通过设置页修改 Provider、提示词和运行参数。
+SQLite 仅支持一个应用进程；多个执行 Worker 使用 PostgreSQL。环境要求、HTTPS、备份恢复和
+回退方法见[部署指南](docs/docker-deployment.md)。
+
+**Windows 桌面版与 Python wheel：** 仓库提供打包工作流及
+[发布产物入口](https://github.com/1ceS1amese/work-harness/releases)。桌面版面向 Windows 10/11 x64，
+需要 WebView2；wheel 包含后端和内置配置，不含工作台前端。请按[Windows 指南](docs/windows-executable.md)
+和所选版本的发布说明使用。当前源码中的变更不代表已有 EXE 或镜像已包含这些变更。
+
+<p align="right">(<a href="#readme-top">返回顶部</a>)</p>
+
+<a id="usage"></a>
+
+## 使用方式
+
+<a id="web-workbench"></a>
+
+### 网页工作台
+
+选择目标、完成条件及需要的 Skill 或 Agent 分工。打开任务详情，可以查看尚未满足的目标、
+事实、探索方向、提示及其关系。人工补充会绑定对应的 Intent 和板面版本。
+
+内置的“**保存候选草稿**”完成条件只验证内容已经保存且可以读取，**不证明事实准确性、答案质量
+或外部操作已经完成**。普通自由文本不会被自动转换为这一较弱的验收条件。
+
+设置入口为 `/settings?section=models`、`/settings?section=prompts` 和 `/settings?section=runtime`。
+部分提示词和复核选项属于旧引擎；黑板中的 Agent 保留各自的私有执行逻辑。
+
+<a id="command-line"></a>
+
+### 命令行
+
+完成模型配置后：
+
+```bash
+# 默认使用黑板；显式接受已保存的候选草稿。
+uv run work-harness run \
+  --goal "起草项目介绍" --acceptance-template saved-draft
+
+# 显式选择旧版规划与复核流程。
+uv run work-harness run --engine legacy --goal "审查这份交付计划"
+
+# 检查配置与扩展契约。
 uv run work-harness check-compatibility
-
-# 列出或校验已安装 Skill。
 uv run work-harness skills list
 uv run work-harness skills validate
-
-# 执行一次任务，并可把 Skill 固定到某个 Provider。
-uv run work-harness run \
-  --goal "审查这份交付计划" \
-  --skill risk-audit@mock-secondary
-
-# 执行确定性流程评测。
-uv run work-harness eval
 ```
 
-使用 wheel 安装时去掉 `uv run`。可通过 `--project-root PATH` 加载自定义项目配置，而不是包内
-默认资源。
+自定义验收使用 `--blackboard-spec goal.json`，文件须包含 `topic` 和已注册知识源能够处理的
+类型化 `acceptance` 条件。参见[任务契约](src/work_harness/domain/models.py)与
+[黑板设计](docs/blackboard-design.md)。CLI 执行任务使用内嵌模式；分布式任务通过 API 提交。
 
-### 自定义 Provider
-
-Web 界面支持两种 Provider 凭据通道：
-
-1. 选择 `openai` 或 `deepseek` 协议行为；
-2. 选择 `chat_completions` 或 `responses`；
-3. 设置允许使用的真实模型 ID；
-4. 映射逻辑模型、主协调组和单独的 `worker-*` Agent；
-5. 选择环境变量注入并填写 API Key 变量名，或选择页面加密保存并仅录入一次密钥；
-6. 启用 Profile 并重启服务。
-
-自动化部署和 Secret Manager 更适合环境变量通道；交互式安装可使用页面保存。浏览器只在保存
-时发送密钥，留空表示保留旧值，查询接口只返回 `credential_configured` 是否就绪。
-
-`main` 绑定会展开到 normalizer、planner、reviewer、judge 和 synthesizer。单独子 Agent 的绑定
-会覆盖逻辑模型默认路由；任务级 Skill Provider 固定具有最高优先级。
-
-## 架构
-
-```mermaid
-flowchart LR
-    UI[Vue 工作台] --> API[FastAPI API]
-    API --> RM[RunManager]
-    RM --> WF[LangGraph 工作流]
-    WF --> MG[ModelGateway]
-    MG --> PA[Provider 适配器]
-    WF --> TG[ToolGateway]
-    WF --> SK[Skill 注册表]
-    WF --> CP[Checkpoint]
-    RM --> RS[RunStore]
-    PA --> PS[ProviderStore]
-```
-
-核心工作流为：
-
-```text
-Normalize → Plan → Worker → Validate → Review → Judge
-          → Repair / Human Gate → Synthesize
-```
-
-四个同构 Worker 共享契约、预算和工具权限，以任务函数和路由区分行为，而不是固化为永久职业。
-参见[架构决策](docs/architecture_decisions.md)、[持久化契约](docs/persistence.md)与
-[安全边界](docs/security_boundary.md)。后端调度、自适应复核和可重复基准见
-[后端性能设计](docs/backend-performance.md)。
-
-## Provider 与 Skill 兼容性
-
-所有启用的 Provider 必须满足同一套可移植能力基线：
-
-```text
-chat + structured_output + tool_calling
-```
-
-Provider 声明、适配器行为、逻辑路由或 Skill 要求不一致时，启动会直接失败。内置适配器支持：
-
-| 协议行为 | API 系列 | 端点后缀 |
-| --- | --- | --- |
-| OpenAI 兼容 | Chat Completions | `/chat/completions` |
-| OpenAI 兼容 | Responses | `/responses` |
-| DeepSeek 方言 | Chat Completions | `/chat/completions` |
-| DeepSeek 方言 | Responses | 自定义端点提供时使用 `/responses` |
-
-`openai_compatible` 表示线协议适配器，不表示服务由 OpenAI 官方托管。端点、模型与密钥变量均
-由使用者定义。详见 [Provider、Tool 与 Skill 兼容说明](docs/provider-skill-compatibility.md)。
-
-## 部署
-
-由于 Checkpoint、RunStore 和 ProviderStore 当前使用 SQLite，Compose 部署会明确限制为一个
-应用实例。
+如需离线验证执行契约，可在 POSIX shell 中显式使用确定性的测试模型：
 
 ```bash
-./scripts/compose.sh status
-./scripts/compose.sh logs
-./scripts/compose.sh backup
-./scripts/compose.sh reload
-./scripts/compose.sh update
-./scripts/compose.sh install
-./scripts/compose.sh down
+WORK_HARNESS_PROFILE=local uv run work-harness run \
+  --goal "验证黑板执行契约" --acceptance-template saved-draft
 ```
 
-使用当前源码进行 HTTPS 生产部署时，先生成私有配置模板，替换部署 Key 和域名，再启动：
+Mock 结果只能验证运行契约，不能证明真实模型质量。建议使用独立的开发检出目录，避免与既有
+Provider 覆盖配置和应用数据混用。
 
-```bash
-./scripts/compose.sh init-production
-# 编辑 .env 和 deploy/runtime.env
-./scripts/compose.sh production
-./scripts/compose.sh ready
-```
+<a id="http-api"></a>
 
-`WORK_HARNESS_IMAGE` 指向已发布 GHCR 镜像时，改用
-`./scripts/compose.sh install-production`。`deploy/runtime.env` 中的模型变量可以留空：服务会先以
-待配置状态启动，管理员可在设置页加密保存 Provider 密钥，再执行
-`./scripts/compose.sh reload`。
+### HTTP API
 
-生产命令会拒绝本地 Profile、示例域名、弱部署 Key 或只配置一半的环境变量 Provider。对外开放
-主机前请完整阅读
-[Docker Compose 部署指南](docs/docker-deployment.md)。除非确定要删除持久状态，否则不要执行
-`docker compose down -v`。
-
-## 项目状态
-
-当前源码包括：
-
-- 71 个后端测试与 15 个前端测试；
-- 风险自适应复核：高风险任务保留三维检查，确定性低风险流程由 11 次模型调用降至 7 次；
-- 事件驱动 SSE、受限的运行/Provider 并发和运行级幂等 Tool 缓存；
-- 10/10 的确定性 Mock 工作流评测；
-- 可持久化的 Provider Profile、页面加密凭据、环境变量凭据与按 Agent 划分的模型路由；
-- 基于租约和心跳的单实例重启恢复；
-- 一个只读工作区 Tool 与两个可执行示例 Skill；
-- 一个将持久化数据置于包外的 Windows x64 单文件 EXE；
-- 带生产配置校验的 Compose 部署、Caddy HTTPS 与安全响应头、存活/就绪检查分离、资源限制，
-  以及包含凭据密钥文件的一致性备份。
-
-仓库不会包含真实 Provider 密钥。多实例存储、可靠任务队列、服务端会话、组织身份和业务 Tool
-仍属于后续工作。参见[开发状态](docs/development-status.md)与 [CHANGELOG.md](CHANGELOG.md)。
-
-## API
-
-| 方法 | 路径 | 用途 |
-| --- | --- | --- |
-| `GET` | `/health/live` | 无需认证的进程存活检查 |
-| `GET` | `/health` | Provider 与存储就绪状态 |
-| `GET` | `/health/ready` | 部署就绪检查；启用的 Provider 不可用时返回 503 |
-| `GET` | `/v1/capabilities` | Agent、函数、模型、Tool 与 Skill |
-| `GET` | `/v1/compatibility` | Provider、适配器、Tool 与 Skill 报告 |
-| `GET` | `/v1/providers` | 生效和持久化的 Provider Profile |
-| `PUT` | `/v1/providers/{name}` | 校验并暂存 Provider Profile |
-| `DELETE` | `/v1/providers/{name}` | 删除持久化 Provider 覆盖 |
-| `POST` | `/v1/runs` | 创建或幂等复用一次运行 |
-| `GET` | `/v1/runs` | 列出持久化运行摘要 |
-| `GET` | `/v1/runs/{run_id}` | 读取完整运行结果 |
-| `GET` | `/v1/runs/{run_id}/events` | 通过 SSE 推送运行快照 |
-| `POST` | `/v1/runs/{run_id}/resume` | 处理人工审批门 |
-| `DELETE` | `/v1/runs/{run_id}` | 取消运行 |
+提交带明确验收条件的任务：
 
 ```bash
 curl --request POST http://127.0.0.1:8000/v1/runs \
   --header 'Content-Type: application/json' \
-  --data '{"goal":"创建一份有边界的实施计划","task_type":"planning"}'
+  --data '{
+    "goal": "起草项目介绍",
+    "blackboard": {
+      "topic": "document",
+      "acceptance": [{
+        "id": "saved-draft",
+        "description": "保存可读取的候选草稿，不验证内容准确性",
+        "claim_key": "draft.content",
+        "claim_type": "delivery",
+        "scope": {"verification": "stored_content_only"},
+        "required_checks": ["content_stored"]
+      }]
+    }
+  }'
 ```
 
-所选 Profile 启用文档时，可在 `/docs` 查看交互式 OpenAPI 文档。
+响应包含 `run_id`。示例使用默认本地配置；启用鉴权的部署还需要携带部署 API Key。
 
-## 致谢
+| 方法 | 接口 | 用途 |
+| --- | --- | --- |
+| `GET` | `/health/live` · `/health/ready` | 进程存活与部署就绪状态 |
+| `GET` | `/v1/capabilities` | Agent、Tool、Skill、默认引擎及验收模板 |
+| `POST` | `/v1/runs` | 提交任务，支持幂等键 |
+| `GET` | `/v1/runs/{run_id}` | 状态、输出与已记录用量 |
+| `GET` | `/v1/runs/{run_id}/events` | SSE 运行更新 |
+| `GET` | `/v1/runs/{run_id}/blackboard` | 板面概况与目标缺口 |
+| `GET` | `/v1/runs/{run_id}/blackboard/objects` | 查询指定板面版本的对象 |
+| `GET` | `/v1/runs/{run_id}/blackboard/events` | 查询持久化黑板事件 |
+| `POST` | `/v1/runs/{run_id}/inputs` | 向黑板 Intent 提交带版本的人工输入 |
+| `DELETE` | `/v1/runs/{run_id}` | 取消任务 |
 
-Work Harness 基于 [FastAPI](https://fastapi.tiangolo.com/)、
-[LangGraph](https://github.com/langchain-ai/langgraph)、[Pydantic](https://docs.pydantic.dev/)、
-[Vue](https://vuejs.org/) 与 [Element Plus](https://element-plus.org/) 构建。README 遵循
-[Standard Readme](https://github.com/RichardLitt/standard-readme)。
+所选 Profile 启用 API 文档时，可在 `/docs` 查看交互式接口说明。
 
-## 贡献
+<a id="token-accounting"></a>
 
-欢迎提出问题、提交缺陷报告和聚焦的 Pull Request。开始前请阅读
-[CONTRIBUTING.md](CONTRIBUTING.md)，使用仓库 Issue 模板并遵守
-[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)。安全问题必须按 [SECURITY.md](SECURITY.md) 中的
-私密流程报告。
+### Token 记录
 
-贡献即表示你同意将贡献内容按 MIT License 授权。
+输入、输出和缓存命中 Token 分别记录。缓存 Token 已包含在输入中，总量只计算 **输入 + 输出**。
+缺失或不完整的用量明确标记为未确认；重复回执和恢复过程不会重复累计同一次调用。
+
+系统不使用累计 Token 或金额额度拦截任务。`max_output_tokens` 只控制单次模型响应的输出长度，
+执行仍受超时、步数、激活次数、重试和并发限制约束。配置见 [Agent 配置](config/agents.yaml)与
+[运行配置](config/runtime.yaml)。
+
+<p align="right">(<a href="#readme-top">返回顶部</a>)</p>
+
+<a id="roadmap"></a>
+
+## 项目进度与后续方向
+
+**当前源码进度：2026-10-22。** 黑板核心、有界并行控制器、网页/API/CLI 入口、知识关系图、
+人工输入、SQLite/PostgreSQL 恢复、备份回退路径及默认引擎切换均已实现。Token 记账已与花销额度
+控制分离。详细实施记录统一保留在[现有设计计划](docs/blackboard-design.md)中。
+
+源码验证覆盖 SQLite 和真实 PostgreSQL 16 API/Worker。后端回归与复测覆盖记账、失败、恢复和
+兼容性；最近记录的前端测试为 **57 项通过**，类型检查与生产构建通过。此前使用 `gpt-5.6-sol`
+完成的六任务对照中，黑板通过 **6/6**，legacy 通过 **1/6**。这只是有限任务集的结果，不代表
+通用任务质量；该对照早于最新 Token 重构。日期、测试批次和评估范围见[开发记录](docs/development-status.md)。
+
+后续待完善的内容包括：
+
+- 按当前源码重新构建并验证 Windows 发布产物，补做容器恢复验证。
+- 扩大真实任务评估，接入业务 Tool、领域验证器及跨 Run 经验复用。
+- 服务端会话同步、用户身份与租户隔离。
+- 分布式环境共享且可编辑的 Provider 和应用设置存储。
+
+历史任务保留自己的引擎和执行身份，继续执行时需要匹配原执行版本与配置。停止接收新黑板
+任务时，将 `WORK_HARNESS_WORKFLOW_ENGINE=legacy`、`WORK_HARNESS_ACCEPT_NEW_BLACKBOARD_RUNS=false`
+设置到部署环境，并一致重启各应用实例；这不会迁移旧检查点。
+
+部署 API Key 是共享的服务凭据，不提供用户或租户边界。扩展部署前请阅读 [SECURITY.md](SECURITY.md)
+与[分布式队列契约](docs/distributed-run-queue.md)。功能建议和已知问题通过
+[GitHub Issues](https://github.com/1ceS1amese/work-harness/issues)跟踪。
+
+<p align="right">(<a href="#readme-top">返回顶部</a>)</p>
+
+<a id="contributing"></a>
+
+## 参与贡献
+
+请先阅读 [CONTRIBUTING.md](CONTRIBUTING.md) 和 [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)。较大的
+行为或架构调整先通过 Issue 讨论，随后创建聚焦的分支或 Fork，提交包含行为说明与验证结果的
+Pull Request。公开接口变化时，请同步维护中英文 README。
+
+常用开发检查：
+
+```bash
+uv run ruff check src tests scripts
+uv run pytest
+npm --prefix frontend run type-check
+npm --prefix frontend test
+npm --prefix frontend run build
+```
+
+PostgreSQL 测试需要将 `WORK_HARNESS_TEST_DATABASE_URL` 指向专用测试数据库，未配置时会跳过。
+数据库、打包与部署检查见[贡献指南](CONTRIBUTING.md)。安全漏洞请按 [SECURITY.md](SECURITY.md)
+中的私密渠道报告。
+
+<p align="right">(<a href="#readme-top">返回顶部</a>)</p>
+
+<a id="license"></a>
 
 ## 许可证
 
-[MIT](LICENSE) © 2026 Work Harness contributors
+本项目采用 [MIT License](LICENSE)。Copyright © 2026 Work Harness contributors。
+
+<a id="contact"></a>
+
+## 联系与反馈
+
+- 项目仓库：[1ceS1amese/work-harness](https://github.com/1ceS1amese/work-harness)
+- 问题与建议：[Issue 模板](https://github.com/1ceS1amese/work-harness/issues/new/choose)
+- 变更与发布：[CHANGELOG.md](CHANGELOG.md) · [GitHub Releases](https://github.com/1ceS1amese/work-harness/releases)
+
+<a id="acknowledgments"></a>
+
+## 致谢
+
+- [Best-README-Template](https://github.com/othneildrew/Best-README-Template)：README 组织结构。
+- [LangGraph](https://github.com/langchain-ai/langgraph)、[FastAPI](https://fastapi.tiangolo.com/) 和
+  [Pydantic](https://docs.pydantic.dev/)：执行与 API 基础。
+- [Vue](https://vuejs.org/)、[Element Plus](https://element-plus.org/)、
+  [pywebview](https://pywebview.flowrl.com/) 和 [PyInstaller](https://pyinstaller.org/)：工作台与桌面工具链。
+
+<p align="right">(<a href="#readme-top">返回顶部</a>)</p>
+
+[ci-shield]: https://github.com/1ceS1amese/work-harness/actions/workflows/ci.yml/badge.svg
+[ci-url]: https://github.com/1ceS1amese/work-harness/actions/workflows/ci.yml
+[python-shield]: https://img.shields.io/badge/Python-3.11%2B-3776AB?style=flat-square&logo=python&logoColor=white
+[python-url]: pyproject.toml
+[license-shield]: https://img.shields.io/badge/License-MIT-blue?style=flat-square
+[license-url]: LICENSE
+[status-shield]: https://img.shields.io/badge/Status-Alpha-orange?style=flat-square
+[status-url]: docs/development-status.md

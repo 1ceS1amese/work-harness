@@ -1,0 +1,105 @@
+{
+  "$defs": {
+    "CommitReceipt": {
+      "additionalProperties": false,
+      "properties": {
+        "board_id": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Board Id",
+          "type": "string"
+        },
+        "idempotency_key": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Idempotency Key",
+          "type": "string"
+        },
+        "request_digest": {
+          "pattern": "^[a-f0-9]{64}$",
+          "title": "Request Digest",
+          "type": "string"
+        },
+        "board_revision": {
+          "minimum": 1,
+          "title": "Board Revision",
+          "type": "integer"
+        },
+        "object_refs": {
+          "items": {
+            "$ref": "#/$defs/ObjectRef"
+          },
+          "title": "Object Refs",
+          "type": "array"
+        },
+        "local_refs": {
+          "additionalProperties": {
+            "$ref": "#/$defs/ObjectRef"
+          },
+          "title": "Local Refs",
+          "type": "object"
+        },
+        "committed_at": {
+          "format": "date-time",
+          "title": "Committed At",
+          "type": "string"
+        }
+      },
+      "required": [
+        "board_id",
+        "idempotency_key",
+        "request_digest",
+        "board_revision",
+        "object_refs",
+        "committed_at"
+      ],
+      "title": "CommitReceipt",
+      "type": "object"
+    },
+    "ObjectRef": {
+      "additionalProperties": false,
+      "properties": {
+        "object_id": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Object Id",
+          "type": "string"
+        },
+        "revision": {
+          "minimum": 1,
+          "title": "Revision",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "object_id",
+        "revision"
+      ],
+      "title": "ObjectRef",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "receipt": {
+      "$ref": "#/$defs/CommitReceipt"
+    },
+    "wakeup": {
+      "enum": [
+        "active",
+        "scheduled",
+        "pending",
+        "settled",
+        "closed"
+      ],
+      "title": "Wakeup",
+      "type": "string"
+    }
+  },
+  "required": [
+    "receipt",
+    "wakeup"
+  ],
+  "title": "HumanInputResult",
+  "type": "object"
+}

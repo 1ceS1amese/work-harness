@@ -1,4 +1,5 @@
 .env
+.env.distributed
 .venv/
 node_modules/
 __pycache__/
@@ -12,6 +13,7 @@ dist/
 var/
 backups/
 deploy/runtime.env
+deploy/runtime.distributed.env
 evaluation/reports/*.json
 !evaluation/reports/.gitkeep
 *:Zone.Identifier

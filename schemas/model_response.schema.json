@@ -21,6 +21,11 @@
           "title": "Cached Tokens",
           "type": "integer"
         },
+        "usage_complete": {
+          "default": true,
+          "title": "Usage Complete",
+          "type": "boolean"
+        },
         "estimated_cost_usd": {
           "default": 0,
           "minimum": 0,

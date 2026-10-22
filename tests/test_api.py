@@ -3,10 +3,36 @@ from pathlib import Path
 
 import httpx
 import pytest
+from fastapi import FastAPI
 
-from work_harness.api.app import create_app
+from work_harness.api.app import FrontendStaticFiles, create_app
+from work_harness.service import RunCapacityError, RunManager
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+
+pytestmark = pytest.mark.usefixtures("legacy_engine")
+
+@pytest.mark.asyncio
+async def test_frontend_settings_route_uses_spa_entry_without_masking_api_404(
+    tmp_path: Path,
+) -> None:
+    frontend = tmp_path / "frontend"
+    frontend.mkdir()
+    (frontend / "index.html").write_text("<h1>settings app</h1>", encoding="utf-8")
+    app = FastAPI()
+    app.mount("/", FrontendStaticFiles(directory=frontend, html=True))
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://test",
+    ) as client:
+        settings = await client.get("/settings")
+        missing_api = await client.get("/v1/does-not-exist")
+
+    assert settings.status_code == 200
+    assert "settings app" in settings.text
+    assert missing_api.status_code == 404
 
 
 def test_secure_profile_requires_api_key(monkeypatch) -> None:
@@ -14,6 +40,15 @@ def test_secure_profile_requires_api_key(monkeypatch) -> None:
     monkeypatch.delenv("WORK_HARNESS_API_KEY", raising=False)
 
     with pytest.raises(ValueError, match="WORK_HARNESS_API_KEY is not configured"):
+        create_app(PROJECT_ROOT)
+
+
+def test_worker_role_cannot_expose_api(monkeypatch) -> None:
+    monkeypatch.setenv("WORK_HARNESS_PROFILE", "distributed")
+    monkeypatch.setenv("WORK_HARNESS_EXECUTION_ROLE", "worker")
+    monkeypatch.delenv("WORK_HARNESS_API_KEY", raising=False)
+
+    with pytest.raises(ValueError, match="worker execution role cannot expose the API"):
         create_app(PROJECT_ROOT)
 
 
@@ -89,7 +124,6 @@ async def test_api_creates_and_queries_run(tmp_path: Path, monkeypatch) -> None:
                 if result.json()["status"] == "succeeded":
                     break
                 await asyncio.sleep(0.01)
-
             assert result is not None
             assert result.json()["status"] == "succeeded"
             assert len(result.json()["artifacts"]) == 2
@@ -121,6 +155,43 @@ async def test_api_creates_and_queries_run(tmp_path: Path, monkeypatch) -> None:
             assert first.status_code == 202
             assert duplicate.json()["run_id"] == first.json()["run_id"]
             assert conflict.status_code == 409
+            for _ in range(30):
+                completed = await client.get(f"/v1/runs/{first.json()['run_id']}")
+                if completed.json()["status"] not in {"pending", "running"}:
+                    break
+                await asyncio.sleep(0.01)
+
+
+@pytest.mark.asyncio
+async def test_api_reports_full_admission_queue_with_retry_after(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(
+        "WORK_HARNESS_CHECKPOINT_PATH", str(tmp_path / "capacity-checkpoint.sqlite")
+    )
+    monkeypatch.setenv(
+        "WORK_HARNESS_RUN_STORE_PATH", str(tmp_path / "capacity-runs.sqlite")
+    )
+    monkeypatch.setenv(
+        "WORK_HARNESS_PROVIDER_STORE_PATH", str(tmp_path / "capacity-providers.sqlite")
+    )
+
+    async def reject_run(_manager, _request):
+        raise RunCapacityError(11)
+
+    monkeypatch.setattr(RunManager, "start", reject_run)
+    app = create_app(PROJECT_ROOT)
+    async with app.router.lifespan_context(app):
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app),
+            base_url="http://test",
+        ) as client:
+            response = await client.post("/v1/runs", json={"goal": "Queue me"})
+
+    assert response.status_code == 429
+    assert response.headers["retry-after"] == "11"
+    assert response.json()["detail"] == "运行队列已满，请稍后重试"
 
 
 @pytest.mark.asyncio
@@ -161,6 +232,108 @@ async def test_production_starts_in_configuration_mode_without_provider_key(
                 if item["name"] == "compatible"
             )
             assert compatible["credential_available"] is False
+
+
+@pytest.mark.asyncio
+async def test_setup_profile_blocks_runs_until_model_service_is_ready(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("WORK_HARNESS_PROFILE", "setup")
+    monkeypatch.delenv("MODEL_BASE_URL", raising=False)
+    monkeypatch.delenv("MODEL_API_KEY", raising=False)
+    monkeypatch.setenv(
+        "WORK_HARNESS_CHECKPOINT_PATH", str(tmp_path / "setup-checkpoint.sqlite")
+    )
+    monkeypatch.setenv("WORK_HARNESS_RUN_STORE_PATH", str(tmp_path / "setup-runs.sqlite"))
+    monkeypatch.setenv(
+        "WORK_HARNESS_PROVIDER_STORE_PATH", str(tmp_path / "setup-providers.sqlite")
+    )
+
+    app = create_app(PROJECT_ROOT)
+    async with app.router.lifespan_context(app):
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app),
+            base_url="http://test",
+        ) as client:
+            readiness = await client.get("/health/ready")
+            assert readiness.status_code == 503
+            assert readiness.json()["providers"] == {"compatible": False}
+
+            response = await client.post("/v1/runs", json={"goal": "test"})
+            assert response.status_code == 503
+            assert "设置页面完成配置" in response.json()["detail"]
+
+            run_index = await client.get("/v1/runs")
+            assert run_index.json()["items"] == []
+
+            configured = await client.put(
+                "/v1/providers/compatible",
+                json={
+                    "config": {
+                        "adapter": "openai_compatible",
+                        "protocol_variant": "openai",
+                        "api_family": "chat_completions",
+                        "enabled": True,
+                        "base_url": "https://models.example.test/v1",
+                        "credential_source": "stored",
+                        "allowed_models": ["real-model"],
+                        "capabilities": ["chat", "structured_output", "tool_calling"],
+                    },
+                    "model_bindings": {
+                        "planner-strong": "real-model",
+                        "worker-fast": "real-model",
+                        "reviewer-independent": "real-model",
+                        "judge-stable": "real-model",
+                        "synthesizer-general": "real-model",
+                    },
+                    "api_key": "manually-supplied-test-key",
+                },
+            )
+            assert configured.status_code == 200
+            assert configured.json()["restart_required"] is True
+
+    restarted = create_app(PROJECT_ROOT)
+    async with restarted.router.lifespan_context(restarted):
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=restarted),
+            base_url="http://test",
+        ) as client:
+            readiness = await client.get("/health/ready")
+            assert readiness.status_code == 200
+            assert readiness.json()["providers"] == {"compatible": True}
+
+
+@pytest.mark.asyncio
+async def test_setup_placeholder_model_is_not_ready_with_only_endpoint_and_key(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("WORK_HARNESS_PROFILE", "setup")
+    monkeypatch.setenv("MODEL_BASE_URL", "https://models.example.test/v1")
+    monkeypatch.setenv("MODEL_API_KEY", "environment-test-key")
+    monkeypatch.delenv("MODEL_ID", raising=False)
+    monkeypatch.setenv(
+        "WORK_HARNESS_CHECKPOINT_PATH", str(tmp_path / "placeholder-checkpoint.sqlite")
+    )
+    monkeypatch.setenv(
+        "WORK_HARNESS_RUN_STORE_PATH", str(tmp_path / "placeholder-runs.sqlite")
+    )
+    monkeypatch.setenv(
+        "WORK_HARNESS_PROVIDER_STORE_PATH", str(tmp_path / "placeholder-providers.sqlite")
+    )
+
+    app = create_app(PROJECT_ROOT)
+    async with app.router.lifespan_context(app):
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app),
+            base_url="http://test",
+        ) as client:
+            readiness = await client.get("/health/ready")
+            assert readiness.status_code == 503
+            assert readiness.json()["providers"] == {"compatible": True}
+            response = await client.post("/v1/runs", json={"goal": "test"})
+            assert response.status_code == 503
 
 
 @pytest.mark.asyncio
@@ -354,6 +527,94 @@ async def test_api_persists_encrypted_ui_managed_provider_key(
             assert stored["loaded"] is True
             assert stored["credential_available"] is True
             assert stored["config"]["credential_source"] == "stored"
+
+
+@pytest.mark.asyncio
+async def test_api_persists_agent_prompts_and_safe_runtime_settings(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv(
+        "WORK_HARNESS_CHECKPOINT_PATH", str(tmp_path / "settings-checkpoint.sqlite")
+    )
+    monkeypatch.setenv(
+        "WORK_HARNESS_RUN_STORE_PATH", str(tmp_path / "settings-runs.sqlite")
+    )
+    monkeypatch.setenv(
+        "WORK_HARNESS_PROVIDER_STORE_PATH", str(tmp_path / "settings-providers.sqlite")
+    )
+    settings_path = tmp_path / "application-settings.json"
+    monkeypatch.setenv("WORK_HARNESS_SETTINGS_PATH", str(settings_path))
+
+    first_app = create_app(PROJECT_ROOT)
+    async with first_app.router.lifespan_context(first_app):
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=first_app),
+            base_url="http://test",
+        ) as client:
+            initial = await client.get("/v1/settings")
+            assert initial.status_code == 200
+            assert initial.json()["restart_required"] is False
+            assert {item["name"] for item in initial.json()["prompts"]} == {
+                "normalizer",
+                "planner",
+                "worker",
+                "reviewer",
+                "judge",
+                "synthesizer",
+            }
+
+            prompt = await client.put(
+                "/v1/settings/prompts/planner",
+                json={"body": "先确认目标，再安排清晰且有边界的工作步骤。"},
+            )
+            assert prompt.status_code == 200
+            planner = next(
+                item for item in prompt.json()["prompts"] if item["name"] == "planner"
+            )
+            assert planner["customized"] is True
+            assert planner["loaded"] is False
+            assert prompt.json()["restart_required"] is True
+
+            runtime = initial.json()["runtime"]
+            runtime["run_max_concurrency"] = 2
+            runtime["max_planned_subtasks"] = 3
+            saved_runtime = await client.put("/v1/settings/runtime", json=runtime)
+            assert saved_runtime.status_code == 200
+            assert saved_runtime.json()["runtime"]["run_max_concurrency"] == 2
+            assert saved_runtime.json()["restart_required"] is True
+
+    assert settings_path.is_file()
+    assert settings_path.stat().st_mode & 0o777 == 0o600
+
+    restarted = create_app(PROJECT_ROOT)
+    async with restarted.router.lifespan_context(restarted):
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=restarted),
+            base_url="http://test",
+        ) as client:
+            settings = await client.get("/v1/settings")
+            assert settings.status_code == 200
+            assert settings.json()["restart_required"] is False
+            planner = next(
+                item for item in settings.json()["prompts"] if item["name"] == "planner"
+            )
+            assert planner["loaded"] is True
+            assert planner["body"].startswith("先确认目标")
+
+            health = await client.get("/health")
+            assert health.json()["scheduler"]["run_max_concurrency"] == 2
+            assert health.json()["scheduler"]["run_queue_capacity"] == 8
+            assert health.json()["scheduler"]["run_queue_retry_after_seconds"] == 5
+            assert health.json()["settings_store"] == "file"
+
+            reset = await client.delete("/v1/settings/prompts/planner")
+            assert reset.status_code == 200
+            reset_planner = next(
+                item for item in reset.json()["prompts"] if item["name"] == "planner"
+            )
+            assert reset_planner["customized"] is False
+            assert reset.json()["restart_required"] is True
 
 
 @pytest.mark.asyncio

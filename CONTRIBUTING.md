@@ -26,7 +26,7 @@ uv run work-harness check-config
 1. Create a focused branch from `main`.
 2. Keep Provider-specific behavior behind adapters and logical model routes.
 3. Preserve the homogeneous-agent contract and structured Pydantic boundaries.
-4. Never commit API keys, `.env` files, SQLite databases, prompts containing private data,
+4. Never commit API keys, `.env` files, SQLite/PostgreSQL dumps, prompts containing private data,
    or raw model responses from non-public datasets.
 5. Add or update tests for behavior changes.
 6. Update `CHANGELOG.md` for user-visible changes.
@@ -43,10 +43,23 @@ npm --prefix frontend run type-check
 npm --prefix frontend test -- --run
 npm --prefix frontend run build
 docker compose --profile public config --quiet
+cp .env.distributed.example .env.distributed
+cp deploy/runtime.distributed.env.example deploy/runtime.distributed.env
+docker compose --env-file .env.distributed \
+  -f compose.yaml -f compose.distributed.yaml config --quiet
 python scripts/check_release.py
 ```
 
 The Mock evaluation checks workflow contracts only; it is not evidence of real-model quality.
+Queue changes also require PostgreSQL 17 and the real-database contract suite:
+
+```bash
+WORK_HARNESS_TEST_DATABASE_URL='postgresql://postgres:postgres@127.0.0.1:5432/work_harness_test?sslmode=disable' \
+  uv run pytest -q tests/test_postgres_queue.py
+```
+
+Remove the temporary `.env.distributed` files after Compose validation; actual deployment files are
+Git-ignored and must never be committed.
 
 ## Pull requests
 

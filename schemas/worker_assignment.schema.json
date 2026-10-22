@@ -1,0 +1,611 @@
+{
+  "$defs": {
+    "AgentAssignment": {
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "$ref": "#/$defs/AllocationMode",
+          "default": "auto"
+        },
+        "assignees": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 8,
+          "title": "Assignees",
+          "type": "array"
+        },
+        "functions_by_agent": {
+          "additionalProperties": {
+            "items": {
+              "$ref": "#/$defs/AgentFunction"
+            },
+            "type": "array"
+          },
+          "title": "Functions By Agent",
+          "type": "object"
+        },
+        "cross_review": {
+          "default": true,
+          "title": "Cross Review",
+          "type": "boolean"
+        }
+      },
+      "title": "AgentAssignment",
+      "type": "object"
+    },
+    "AgentFunction": {
+      "enum": [
+        "analysis",
+        "research",
+        "execution",
+        "risk"
+      ],
+      "title": "AgentFunction",
+      "type": "string"
+    },
+    "AllocationMode": {
+      "enum": [
+        "auto",
+        "direct",
+        "cross_functional"
+      ],
+      "title": "AllocationMode",
+      "type": "string"
+    },
+    "Artifact": {
+      "additionalProperties": false,
+      "properties": {
+        "artifact_id": {
+          "title": "Artifact Id",
+          "type": "string"
+        },
+        "run_id": {
+          "title": "Run Id",
+          "type": "string"
+        },
+        "subtask_id": {
+          "title": "Subtask Id",
+          "type": "string"
+        },
+        "producer": {
+          "title": "Producer",
+          "type": "string"
+        },
+        "version": {
+          "default": 1,
+          "minimum": 1,
+          "title": "Version",
+          "type": "integer"
+        },
+        "content": {
+          "maxLength": 200000,
+          "minLength": 1,
+          "title": "Content",
+          "type": "string"
+        },
+        "evidence": {
+          "items": {
+            "$ref": "#/$defs/Evidence"
+          },
+          "title": "Evidence",
+          "type": "array"
+        },
+        "assumptions": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Assumptions",
+          "type": "array"
+        },
+        "unresolved_questions": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Unresolved Questions",
+          "type": "array"
+        },
+        "confidence": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Confidence",
+          "type": "number"
+        },
+        "status": {
+          "$ref": "#/$defs/ArtifactStatus",
+          "default": "success"
+        },
+        "created_at": {
+          "format": "date-time",
+          "title": "Created At",
+          "type": "string"
+        },
+        "duration_ms": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Duration Ms",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "run_id",
+        "subtask_id",
+        "producer",
+        "content",
+        "confidence"
+      ],
+      "title": "Artifact",
+      "type": "object"
+    },
+    "ArtifactStatus": {
+      "enum": [
+        "success",
+        "partial",
+        "failed"
+      ],
+      "title": "ArtifactStatus",
+      "type": "string"
+    },
+    "Evidence": {
+      "additionalProperties": false,
+      "properties": {
+        "source": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Source",
+          "type": "string"
+        },
+        "locator": {
+          "anyOf": [
+            {
+              "maxLength": 2000,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Locator"
+        },
+        "summary": {
+          "maxLength": 4000,
+          "minLength": 1,
+          "title": "Summary",
+          "type": "string"
+        },
+        "tool_call_id": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tool Call Id"
+        }
+      },
+      "required": [
+        "source",
+        "summary"
+      ],
+      "title": "Evidence",
+      "type": "object"
+    },
+    "Review": {
+      "additionalProperties": false,
+      "properties": {
+        "review_id": {
+          "title": "Review Id",
+          "type": "string"
+        },
+        "artifact_id": {
+          "title": "Artifact Id",
+          "type": "string"
+        },
+        "artifact_version": {
+          "minimum": 1,
+          "title": "Artifact Version",
+          "type": "integer"
+        },
+        "reviewer": {
+          "title": "Reviewer",
+          "type": "string"
+        },
+        "dimension": {
+          "title": "Dimension",
+          "type": "string"
+        },
+        "verdict": {
+          "$ref": "#/$defs/ReviewVerdict"
+        },
+        "issues": {
+          "items": {
+            "$ref": "#/$defs/ReviewIssue"
+          },
+          "title": "Issues",
+          "type": "array"
+        },
+        "confidence": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Confidence",
+          "type": "number"
+        },
+        "created_at": {
+          "format": "date-time",
+          "title": "Created At",
+          "type": "string"
+        }
+      },
+      "required": [
+        "artifact_id",
+        "artifact_version",
+        "reviewer",
+        "dimension",
+        "verdict",
+        "confidence"
+      ],
+      "title": "Review",
+      "type": "object"
+    },
+    "ReviewIssue": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Code",
+          "type": "string"
+        },
+        "severity": {
+          "$ref": "#/$defs/Severity"
+        },
+        "message": {
+          "maxLength": 4000,
+          "minLength": 1,
+          "title": "Message",
+          "type": "string"
+        },
+        "evidence": {
+          "anyOf": [
+            {
+              "maxLength": 4000,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Evidence"
+        },
+        "recommendation": {
+          "anyOf": [
+            {
+              "maxLength": 4000,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Recommendation"
+        }
+      },
+      "required": [
+        "code",
+        "severity",
+        "message"
+      ],
+      "title": "ReviewIssue",
+      "type": "object"
+    },
+    "ReviewVerdict": {
+      "enum": [
+        "pass",
+        "revise",
+        "reject"
+      ],
+      "title": "ReviewVerdict",
+      "type": "string"
+    },
+    "RiskLevel": {
+      "enum": [
+        "low",
+        "medium",
+        "high",
+        "critical"
+      ],
+      "title": "RiskLevel",
+      "type": "string"
+    },
+    "Severity": {
+      "enum": [
+        "info",
+        "warning",
+        "error",
+        "critical"
+      ],
+      "title": "Severity",
+      "type": "string"
+    },
+    "SkillSelection": {
+      "additionalProperties": false,
+      "properties": {
+        "skill_id": {
+          "maxLength": 64,
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+          "title": "Skill Id",
+          "type": "string"
+        },
+        "provider": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z][a-z0-9_-]{1,63}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Provider"
+        }
+      },
+      "required": [
+        "skill_id"
+      ],
+      "title": "SkillSelection",
+      "type": "object"
+    },
+    "SubtaskSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "subtask_id": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Subtask Id",
+          "type": "string"
+        },
+        "title": {
+          "maxLength": 300,
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        },
+        "description": {
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Description",
+          "type": "string"
+        },
+        "dependencies": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Dependencies",
+          "type": "array"
+        },
+        "worker_role": {
+          "default": "worker-01",
+          "title": "Worker Role",
+          "type": "string"
+        },
+        "assigned_function": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AgentFunction"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "logical_model": {
+          "default": "worker-fast",
+          "title": "Logical Model",
+          "type": "string"
+        },
+        "allowed_tools": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Allowed Tools",
+          "type": "array"
+        },
+        "skill_ids": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 8,
+          "title": "Skill Ids",
+          "type": "array"
+        },
+        "acceptance_criteria": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Acceptance Criteria",
+          "type": "array"
+        },
+        "max_output_tokens": {
+          "default": 5000,
+          "description": "Maximum output tokens per model call.",
+          "minimum": 1,
+          "title": "Max Output Tokens",
+          "type": "integer"
+        },
+        "cost_budget_usd": {
+          "default": 0,
+          "deprecated": true,
+          "minimum": 0,
+          "title": "Cost Budget Usd",
+          "type": "number"
+        }
+      },
+      "required": [
+        "subtask_id",
+        "title",
+        "description",
+        "acceptance_criteria"
+      ],
+      "title": "SubtaskSpec",
+      "type": "object"
+    },
+    "TaskSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "task_id": {
+          "title": "Task Id",
+          "type": "string"
+        },
+        "goal": {
+          "maxLength": 20000,
+          "minLength": 1,
+          "title": "Goal",
+          "type": "string"
+        },
+        "context": {
+          "additionalProperties": true,
+          "title": "Context",
+          "type": "object"
+        },
+        "constraints": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Constraints",
+          "type": "array"
+        },
+        "expected_output": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Expected Output"
+        },
+        "task_type": {
+          "default": "general",
+          "title": "Task Type",
+          "type": "string"
+        },
+        "risk_level": {
+          "$ref": "#/$defs/RiskLevel",
+          "default": "low"
+        },
+        "assignment": {
+          "$ref": "#/$defs/AgentAssignment"
+        },
+        "skills": {
+          "items": {
+            "$ref": "#/$defs/SkillSelection"
+          },
+          "maxItems": 8,
+          "title": "Skills",
+          "type": "array"
+        },
+        "ambiguities": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Ambiguities",
+          "type": "array"
+        },
+        "created_at": {
+          "format": "date-time",
+          "title": "Created At",
+          "type": "string"
+        }
+      },
+      "required": [
+        "goal"
+      ],
+      "title": "TaskSpec",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "run_id": {
+      "title": "Run Id",
+      "type": "string"
+    },
+    "task": {
+      "$ref": "#/$defs/TaskSpec"
+    },
+    "subtask": {
+      "$ref": "#/$defs/SubtaskSpec"
+    },
+    "artifact_version": {
+      "default": 1,
+      "minimum": 1,
+      "title": "Artifact Version",
+      "type": "integer"
+    },
+    "repair_round": {
+      "default": 0,
+      "minimum": 0,
+      "title": "Repair Round",
+      "type": "integer"
+    },
+    "dependency_artifacts": {
+      "items": {
+        "$ref": "#/$defs/Artifact"
+      },
+      "title": "Dependency Artifacts",
+      "type": "array"
+    },
+    "previous_artifact": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Artifact"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "feedback": {
+      "items": {
+        "$ref": "#/$defs/Review"
+      },
+      "title": "Feedback",
+      "type": "array"
+    },
+    "repair_reasons": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Repair Reasons",
+      "type": "array"
+    },
+    "validation_issues": {
+      "items": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "title": "Validation Issues",
+      "type": "array"
+    }
+  },
+  "required": [
+    "run_id",
+    "task",
+    "subtask"
+  ],
+  "title": "WorkerAssignment",
+  "type": "object"
+}

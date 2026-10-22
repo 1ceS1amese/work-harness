@@ -1,5 +1,5 @@
 schema_version: 1
-profile: local
+profile: setup
 providers:
   mock:
     adapter: mock

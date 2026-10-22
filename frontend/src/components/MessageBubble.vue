@@ -97,6 +97,10 @@ const agentEvents = computed<AgentEvent[]>(() => {
   }
 
   const events: AgentEvent[] = []
+  if (run.engine === 'blackboard') {
+    return [eventFor(`${run.run_id}:blackboard`, 'blackboard',
+      run.output || getRunStage(run).description, 'planner', '共享黑板', '目标、探索与证据')]
+  }
   if (run.task) {
     const assigneeNames = run.task.assignment.assignees
       .map((id) => descriptor(id)?.display_name ?? id)
@@ -264,16 +268,18 @@ const agentEvents = computed<AgentEvent[]>(() => {
             effect="plain"
             :type="statusTagType(message.status)"
           >
-            {{ STATUS_LABELS[message.status] }}
+            {{ run.engine === 'blackboard' && message.status === 'waiting_human' ? '等待补充' : STATUS_LABELS[message.status] }}
           </el-tag>
         </div>
         <el-progress
+          v-if="stage.progress !== null"
           :percentage="stage.progress"
           :stroke-width="6"
           :show-text="false"
           :status="message.status === 'failed' ? 'exception' : message.status === 'succeeded' ? 'success' : undefined"
         />
-        <div class="run-facts">
+        <p v-if="run.engine === 'blackboard'">{{ stage.description }}</p>
+        <div v-else class="run-facts">
           <span>{{ run.plan?.subtasks.length ?? 0 }} 件分工</span>
           <span>{{ run.artifacts.length }} 份成员回复</span>
           <span>{{ run.reviews.length }} 次检查</span>
@@ -283,7 +289,7 @@ const agentEvents = computed<AgentEvent[]>(() => {
         <Loading class="spin" /> 任务管家正在安排这件事…
       </div>
 
-      <div v-if="message.status === 'waiting_human' && message.runId" class="approval-box">
+      <div v-if="run && run.engine !== 'blackboard' && message.status === 'waiting_human' && message.runId" class="approval-box">
         <strong>这一步需要你点头</strong>
         <p>因为风险比较高，大家先暂停了。你可以补充一句说明，再决定要不要继续。</p>
         <el-input v-model="note" maxlength="500" placeholder="有补充说明的话，可以写在这里" />

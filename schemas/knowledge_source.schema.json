@@ -1,0 +1,269 @@
+{
+  "$defs": {
+    "ActivationRule": {
+      "additionalProperties": false,
+      "description": "A finite, deterministic matching rule; no LLM calls or executable expressions.",
+      "properties": {
+        "intent_topics": {
+          "default": [],
+          "items": {
+            "maxLength": 500,
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Intent Topics",
+          "type": "array"
+        },
+        "required_facts": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/FactQuery"
+          },
+          "title": "Required Facts",
+          "type": "array"
+        },
+        "absent_facts": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/FactQuery"
+          },
+          "title": "Absent Facts",
+          "type": "array"
+        },
+        "hint_topics": {
+          "default": [],
+          "items": {
+            "maxLength": 500,
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Hint Topics",
+          "type": "array"
+        },
+        "absent_hint_topics": {
+          "default": [],
+          "items": {
+            "maxLength": 500,
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Absent Hint Topics",
+          "type": "array"
+        },
+        "accept_blocked": {
+          "default": false,
+          "title": "Accept Blocked",
+          "type": "boolean"
+        },
+        "reason": {
+          "maxLength": 2000,
+          "minLength": 1,
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "reason"
+      ],
+      "title": "ActivationRule",
+      "type": "object"
+    },
+    "FactQuery": {
+      "additionalProperties": false,
+      "properties": {
+        "claim_key": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Claim Key",
+          "type": "string"
+        },
+        "claim_type": {
+          "anyOf": [
+            {
+              "enum": [
+                "user_statement",
+                "file_content",
+                "tool_observation",
+                "derived",
+                "assessment",
+                "delivery"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Claim Type"
+        },
+        "scope": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Scope",
+          "type": "object"
+        }
+      },
+      "required": [
+        "claim_key"
+      ],
+      "title": "FactQuery",
+      "type": "object"
+    },
+    "SourceLimits": {
+      "additionalProperties": false,
+      "properties": {
+        "max_output_tokens": {
+          "default": 4096,
+          "description": "Maximum output tokens per model call; never a cumulative allowance.",
+          "minimum": 0,
+          "title": "Max Output Tokens",
+          "type": "integer"
+        },
+        "cost_budget_usd": {
+          "default": 0,
+          "deprecated": true,
+          "minimum": 0,
+          "title": "Cost Budget Usd",
+          "type": "number"
+        },
+        "timeout_seconds": {
+          "default": 30,
+          "exclusiveMinimum": 0,
+          "maximum": 3600,
+          "title": "Timeout Seconds",
+          "type": "number"
+        },
+        "max_attempts": {
+          "default": 1,
+          "maximum": 5,
+          "minimum": 1,
+          "title": "Max Attempts",
+          "type": "integer"
+        }
+      },
+      "title": "SourceLimits",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "pattern": "^[a-z][a-z0-9_-]{0,63}$",
+      "title": "Id",
+      "type": "string"
+    },
+    "version": {
+      "maxLength": 500,
+      "minLength": 1,
+      "title": "Version",
+      "type": "string"
+    },
+    "input_topics": {
+      "default": [],
+      "items": {
+        "maxLength": 500,
+        "minLength": 1,
+        "type": "string"
+      },
+      "title": "Input Topics",
+      "type": "array"
+    },
+    "accepted_kinds": {
+      "default": [
+        "fact",
+        "hint",
+        "intent"
+      ],
+      "items": {
+        "enum": [
+          "fact",
+          "intent",
+          "hint"
+        ],
+        "type": "string"
+      },
+      "title": "Accepted Kinds",
+      "type": "array"
+    },
+    "emitted_kinds": {
+      "items": {
+        "enum": [
+          "fact",
+          "intent",
+          "hint"
+        ],
+        "type": "string"
+      },
+      "title": "Emitted Kinds",
+      "type": "array"
+    },
+    "activation_rule": {
+      "$ref": "#/$defs/ActivationRule"
+    },
+    "allowed_tools": {
+      "default": [],
+      "items": {
+        "maxLength": 500,
+        "minLength": 1,
+        "type": "string"
+      },
+      "title": "Allowed Tools",
+      "type": "array"
+    },
+    "model_route": {
+      "anyOf": [
+        {
+          "maxLength": 500,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Model Route"
+    },
+    "limits": {
+      "$ref": "#/$defs/SourceLimits"
+    },
+    "adapter_type": {
+      "enum": [
+        "observation",
+        "agent",
+        "verification",
+        "rule"
+      ],
+      "title": "Adapter Type",
+      "type": "string"
+    },
+    "strategy_version": {
+      "default": "1",
+      "maxLength": 500,
+      "minLength": 1,
+      "title": "Strategy Version",
+      "type": "string"
+    },
+    "can_retract_facts": {
+      "default": false,
+      "title": "Can Retract Facts",
+      "type": "boolean"
+    },
+    "can_supersede_facts": {
+      "default": false,
+      "title": "Can Supersede Facts",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "id",
+    "version",
+    "emitted_kinds",
+    "activation_rule",
+    "adapter_type"
+  ],
+  "title": "KnowledgeSourceSpec",
+  "type": "object"
+}

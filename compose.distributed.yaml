@@ -1,0 +1,139 @@
+name: ${COMPOSE_PROJECT_NAME:-work-harness}
+
+services:
+  postgres:
+    image: ${POSTGRES_IMAGE:-postgres:17-bookworm}
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${WORK_HARNESS_DATABASE_NAME:-work_harness}
+      POSTGRES_USER: ${WORK_HARNESS_DATABASE_USER:-work_harness}
+      POSTGRES_PASSWORD: ${WORK_HARNESS_DATABASE_PASSWORD:?database password is required}
+    volumes:
+      - work_harness_postgres:/var/lib/postgresql/data
+    shm_size: 256mb
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${WORK_HARNESS_DATABASE_USER:-work_harness} -d ${WORK_HARNESS_DATABASE_NAME:-work_harness}",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 256
+    mem_limit: ${WORK_HARNESS_POSTGRES_MEMORY_LIMIT:-1g}
+    logging:
+      driver: json-file
+      options:
+        max-size: ${WORK_HARNESS_LOG_MAX_SIZE:-10m}
+        max-file: ${WORK_HARNESS_LOG_MAX_FILES:-3}
+
+  migrate:
+    image: ${WORK_HARNESS_IMAGE:-work-harness:local}
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        NODE_IMAGE: ${NODE_IMAGE:-node:22-bookworm-slim}
+        PYTHON_IMAGE: ${PYTHON_IMAGE:-python:3.12-slim-bookworm}
+        UV_IMAGE: ${UV_IMAGE:-ghcr.io/astral-sh/uv:0.12.0}
+    command: ["migrate"]
+    restart: "no"
+    env_file:
+      - path: ./deploy/runtime.distributed.env
+        required: true
+    environment: &distributed-environment
+      WORK_HARNESS_PROFILE: distributed
+      WORK_HARNESS_DATABASE_URL: >-
+        postgresql://${WORK_HARNESS_DATABASE_USER:-work_harness}:${WORK_HARNESS_DATABASE_PASSWORD}@postgres:5432/${WORK_HARNESS_DATABASE_NAME:-work_harness}
+      LANGGRAPH_STRICT_MSGPACK: "true"
+      WORK_HARNESS_RUN_MAX_CONCURRENCY: ${WORK_HARNESS_RUN_MAX_CONCURRENCY:-4}
+      WORK_HARNESS_RUN_QUEUE_CAPACITY: ${WORK_HARNESS_RUN_QUEUE_CAPACITY:-32}
+      WORK_HARNESS_RUN_QUEUE_RETRY_AFTER_SECONDS: ${WORK_HARNESS_RUN_QUEUE_RETRY_AFTER_SECONDS:-5}
+      WORK_HARNESS_RUN_TIMEOUT_SECONDS: ${WORK_HARNESS_RUN_TIMEOUT_SECONDS:-300}
+      WORK_HARNESS_RUN_LEASE_SECONDS: ${WORK_HARNESS_RUN_LEASE_SECONDS:-30}
+      WORK_HARNESS_HEARTBEAT_INTERVAL_SECONDS: ${WORK_HARNESS_HEARTBEAT_INTERVAL_SECONDS:-10}
+      WORK_HARNESS_EXECUTION_POLL_INTERVAL_SECONDS: ${WORK_HARNESS_EXECUTION_POLL_INTERVAL_SECONDS:-0.5}
+      WORK_HARNESS_WORKER_STALE_SECONDS: ${WORK_HARNESS_WORKER_STALE_SECONDS:-30}
+      WORK_HARNESS_JOB_MAX_ATTEMPTS: ${WORK_HARNESS_JOB_MAX_ATTEMPTS:-3}
+      WORK_HARNESS_RETRY_BASE_SECONDS: ${WORK_HARNESS_RETRY_BASE_SECONDS:-2}
+      WORK_HARNESS_RETRY_MAX_SECONDS: ${WORK_HARNESS_RETRY_MAX_SECONDS:-60}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - work_harness_data:/app/var
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+  work-harness:
+    command: ["serve", "--host", "0.0.0.0", "--port", "8000"]
+    env_file:
+      - path: ./deploy/runtime.distributed.env
+        required: true
+    environment:
+      <<: *distributed-environment
+      WORK_HARNESS_EXECUTION_ROLE: api
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      work-harness-worker:
+        condition: service_healthy
+
+  work-harness-worker:
+    image: ${WORK_HARNESS_IMAGE:-work-harness:local}
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        NODE_IMAGE: ${NODE_IMAGE:-node:22-bookworm-slim}
+        PYTHON_IMAGE: ${PYTHON_IMAGE:-python:3.12-slim-bookworm}
+        UV_IMAGE: ${UV_IMAGE:-ghcr.io/astral-sh/uv:0.12.0}
+    command: ["worker"]
+    init: true
+    restart: unless-stopped
+    env_file:
+      - path: ./deploy/runtime.distributed.env
+        required: true
+    environment:
+      <<: *distributed-environment
+      WORK_HARNESS_EXECUTION_ROLE: worker
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 256
+    cpus: ${WORK_HARNESS_WORKER_CPUS:-2.0}
+    mem_limit: ${WORK_HARNESS_WORKER_MEMORY_LIMIT:-2g}
+    stop_grace_period: 330s
+    healthcheck:
+      test: ["CMD", "work-harness", "--project-root", "/app", "worker-health"]
+      interval: 15s
+      timeout: 8s
+      start_period: 30s
+      retries: 5
+    logging:
+      driver: json-file
+      options:
+        max-size: ${WORK_HARNESS_LOG_MAX_SIZE:-10m}
+        max-file: ${WORK_HARNESS_LOG_MAX_FILES:-3}
+
+volumes:
+  work_harness_postgres:
+    name: ${WORK_HARNESS_POSTGRES_VOLUME:-work-harness-postgres}

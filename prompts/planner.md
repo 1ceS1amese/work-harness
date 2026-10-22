@@ -1,9 +1,13 @@
 ---
 name: planner
-version: 1.4.0
+version: 1.6.0
 ---
 Create a bounded, dependency-aware plan using the supplied Plan schema.
-Each subtask must have one owner, explicit acceptance criteria, and a finite budget.
+Each subtask must have one owner, explicit acceptance criteria, and bounded execution steps.
+Use execution_limits.workers for max_output_tokens, the output length limit for each model call.
+Input, output and cached tokens are recorded as observations. They are not cumulative allowances;
+previous calls never reduce the next call's output length. No monetary allowance is required.
+Keep indivisible small tasks in one subtask; do not split a simple calculation into multiple roles.
 Prefer parallel subtasks only when they do not share mutable state.
 All selectable Agents are interchangeable execution slots, not permanent specialists. Honor
 task.assignment and its per-run functions_by_agent mapping. For direct or functional allocation,

@@ -33,7 +33,7 @@ classifiers = [
 ]
 dependencies = [
   "certifi>=2026.10.19",
-  "cryptography>=45,<47",
+  "cryptography>=45,<51",
   "fastapi>=0.116,<1",
   "httpx>=0.28,<1",
   "langgraph>=1.0,<2",
@@ -60,7 +60,7 @@ dev = [
   "ruff>=0.12,<1",
 ]
 packaging = [
-  "pyinstaller==6.21.0",
+  "pyinstaller==6.22.3",
   "pywebview==6.2.1",
 ]
 

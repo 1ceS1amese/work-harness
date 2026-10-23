@@ -34,7 +34,7 @@ def _load_yaml(path: Path) -> dict[str, Any]:
     if not path.is_file():
         raise FileNotFoundError(f"required configuration file does not exist: {path}")
     with path.open("r", encoding="utf-8") as stream:
-        value = yaml.safe_load(stream)
+        value = yaml.load(stream, Loader=getattr(yaml, "CSafeLoader", yaml.SafeLoader))
     if not isinstance(value, dict):
         raise ValueError(f"configuration root must be a mapping: {path}")
     # Normalize before merging so old profile overrides still override the new base key.

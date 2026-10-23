@@ -10,6 +10,7 @@ from typing import Any
 
 from work_harness.domain.enums import RunStatus
 from work_harness.domain.models import utc_now
+from work_harness.storage.async_utils import write_in_thread
 from work_harness.storage.base import RunExecutionVersion, RunRecord, RunStoreNotFoundError
 
 
@@ -28,7 +29,7 @@ class SQLiteRunStore:
 
     async def initialize(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        await asyncio.to_thread(self._initialize_sync)
+        await write_in_thread(self._initialize_sync)
 
     def _initialize_sync(self) -> None:
         with closing(self._connect()) as connection:
@@ -73,13 +74,18 @@ class SQLiteRunStore:
                 "ON run_index(status, lease_expires_at)"
             )
             connection.execute(
+                "CREATE INDEX IF NOT EXISTS ix_run_index_history "
+                "ON run_index(created_at DESC, run_id DESC)"
+            )
+            connection.execute(
                 "CREATE TABLE IF NOT EXISTS run_inputs ("
                 "run_id TEXT PRIMARY KEY REFERENCES run_index(run_id), payload TEXT NOT NULL)"
             )
             connection.commit()
 
     async def close(self) -> None:
-        return None
+        async with self._write_lock:
+            pass
 
     async def reserve(
         self, record: RunRecord, *, initial_input: dict[str, Any] | None = None
@@ -88,7 +94,7 @@ class SQLiteRunStore:
             json.dumps(initial_input, ensure_ascii=False) if initial_input is not None else None
         )
         async with self._write_lock:
-            return await asyncio.to_thread(self._reserve_sync, record, payload)
+            return await write_in_thread(self._reserve_sync, record, payload)
 
     def _reserve_sync(self, record: RunRecord, initial_input: str | None) -> RunRecord:
         with closing(self._connect()) as connection:
@@ -168,7 +174,7 @@ class SQLiteRunStore:
 
     async def update_status(self, run_id: str, status: RunStatus) -> RunRecord:
         async with self._write_lock:
-            return await asyncio.to_thread(self._update_status_sync, run_id, status)
+            return await write_in_thread(self._update_status_sync, run_id, status)
 
     def _update_status_sync(self, run_id: str, status: RunStatus) -> RunRecord:
         updated_at = utc_now()
@@ -217,7 +223,7 @@ class SQLiteRunStore:
 
     async def claim(self, run_id: str, *, owner: str, lease_seconds: float) -> RunRecord | None:
         async with self._write_lock:
-            return await asyncio.to_thread(self._claim_sync, run_id, owner, lease_seconds)
+            return await write_in_thread(self._claim_sync, run_id, owner, lease_seconds)
 
     def _claim_sync(self, run_id: str, owner: str, lease_seconds: float) -> RunRecord | None:
         now = utc_now()
@@ -256,7 +262,7 @@ class SQLiteRunStore:
 
     async def heartbeat(self, run_id: str, *, owner: str, lease_seconds: float) -> bool:
         async with self._write_lock:
-            return await asyncio.to_thread(self._heartbeat_sync, run_id, owner, lease_seconds)
+            return await write_in_thread(self._heartbeat_sync, run_id, owner, lease_seconds)
 
     def _heartbeat_sync(self, run_id: str, owner: str, lease_seconds: float) -> bool:
         now = utc_now()
@@ -282,7 +288,7 @@ class SQLiteRunStore:
 
     async def release(self, run_id: str, *, owner: str) -> None:
         async with self._write_lock:
-            await asyncio.to_thread(self._release_sync, run_id, owner)
+            await write_in_thread(self._release_sync, run_id, owner)
 
     def _release_sync(self, run_id: str, owner: str) -> None:
         with closing(self._connect()) as connection:

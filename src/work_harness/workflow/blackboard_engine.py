@@ -14,7 +14,7 @@ from work_harness.blackboard.protocol import BlackboardDelta, BoardNotFoundError
 from work_harness.blackboard.store import BlackboardStore
 from work_harness.blackboard.verification import VerificationReceiptStore, VerificationRegistry
 from work_harness.domain.models import TaskRequest
-from work_harness.knowledge_sources.catalog import CATALOG_REVISION, build_product_sources
+from work_harness.knowledge_sources.catalog import build_product_sources, catalog_revision
 from work_harness.workflow.agent_services import AgentServices
 from work_harness.workflow.blackboard_runner import BlackboardRunner
 
@@ -60,7 +60,7 @@ class BlackboardEngine:
             "workflow_revision": BLACKBOARD_WORKFLOW_REVISION,
             "schema_version": 1,
             "storage": self.storage,
-            "verification_policy": CATALOG_REVISION,
+            "verification_policy": catalog_revision(self.request),
             "human_input_policy": INPUT_POLICY_REVISION,
             "scheduling_policy": BLACKBOARD_WORKFLOW_REVISION,
             "limits": self.limits.model_dump(mode="json"),

@@ -39,6 +39,7 @@ from work_harness.blackboard.protocol import (
     WriterToken,
 )
 from work_harness.blackboard.store import CommitRequest, validate_commit, validate_publication
+from work_harness.storage.async_utils import write_in_thread
 from work_harness.storage.blackboard_lock import BlackboardProcessLock
 
 _Result = TypeVar("_Result")
@@ -182,21 +183,7 @@ class SQLiteBlackboardStore:
         return connection
 
     async def _thread(self, operation: Callable[[], _Result]) -> _Result:
-        # Cancellation cannot leave a database thread running after close releases its lock.
-        task = asyncio.create_task(asyncio.to_thread(operation))
-        try:
-            return await asyncio.shield(task)
-        except asyncio.CancelledError:
-            while not task.done():
-                try:
-                    await asyncio.shield(task)
-                except asyncio.CancelledError:
-                    continue
-                except Exception:
-                    break
-            if not task.cancelled():
-                task.exception()
-            raise
+        return await write_in_thread(operation)
 
     async def initialize(self) -> None:
         async with self._lock:

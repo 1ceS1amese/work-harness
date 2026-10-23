@@ -1,0 +1,67 @@
+{
+  "measured_at": "2026-10-22",
+  "python": "3.12.3",
+  "platform": "Linux",
+  "scope": "Isolated local read workload; no model inference or production load",
+  "before": {
+    "samples": 40,
+    "history_records": 50000,
+    "api_concurrency": 4,
+    "config_load": {
+      "mean_ms": 14.642,
+      "p50_ms": 14.222,
+      "p95_ms": 16.624
+    },
+    "history_first_page": {
+      "mean_ms": 28.963,
+      "p50_ms": 27.157,
+      "p95_ms": 31.523
+    },
+    "history_query_plan": [
+      "SCAN run_index",
+      "USE TEMP B-TREE FOR ORDER BY"
+    ],
+    "settings_api": {
+      "mean_ms": 53.972,
+      "p50_ms": 33.439,
+      "p95_ms": 110.765
+    },
+    "event_loop_lag": {
+      "mean_ms": 95.266,
+      "p50_ms": 104.147,
+      "p95_ms": 130.608
+    },
+    "real_model_calls": 0,
+    "quality_claim": false
+  },
+  "after": {
+    "samples": 40,
+    "history_records": 50000,
+    "api_concurrency": 4,
+    "config_load": {
+      "mean_ms": 2.349,
+      "p50_ms": 2.109,
+      "p95_ms": 3.87
+    },
+    "history_first_page": {
+      "mean_ms": 0.659,
+      "p50_ms": 0.645,
+      "p95_ms": 0.706
+    },
+    "history_query_plan": [
+      "SCAN run_index USING INDEX ix_run_index_history"
+    ],
+    "settings_api": {
+      "mean_ms": 26.828,
+      "p50_ms": 22.378,
+      "p95_ms": 52.233
+    },
+    "event_loop_lag": {
+      "mean_ms": 2.122,
+      "p50_ms": 0.939,
+      "p95_ms": 4.405
+    },
+    "real_model_calls": 0,
+    "quality_claim": false
+  }
+}

@@ -199,8 +199,9 @@ WORK_HARNESS_API_KEY=replace-manually
 7. 执行 `./scripts/compose.sh ready`，并查看 `/v1/compatibility` 后再做真实任务验收。
 
 访问宿主机上的模型服务时可使用 `host.docker.internal`。Linux Engine 下 Compose
-已经将它映射到 host gateway。HTTP 或私网端点还必须在对应 Provider Profile 中明确
-启用 `allow_insecure_http` 和 `allow_private_network`；这些开关不应在公网端点上启用。
+已经将它映射到 host gateway。页面根据地址自动兼容连接，不再需要额外勾选 HTTP 或私网许可。
+未写协议的本机、内网和容器地址自动使用 HTTP，公网域名默认 HTTPS；显式协议保持不变。
+部署配置仍可通过 `allow_insecure_http: false` 或 `allow_private_network: false` 设置限制。
 
 `production` 会禁用 Mock 并启用默认 `compatible` Provider。投入真实任务前，必须确保持久化
 的 `compatible` Profile 或生产 YAML 已使用真实模型 ID 和完整路由替换

@@ -13,24 +13,21 @@ vi.mock('../services/api', () => ({
 }))
 
 const providersMock = vi.mocked(harnessApi.providers)
-const elementStubs = {
-  ElAlert: {
+const uiStubs = {
+  Alert: {
     props: ['title', 'description'],
     template: '<div>{{ title }} {{ description }}</div>',
   },
-  ElTag: { template: '<span><slot /></span>' },
-  ElButton: { template: '<button><slot /></button>' },
-  ElPopconfirm: { template: '<div><slot name="reference" /></div>' },
-  ElSkeleton: true,
-  ElEmpty: true,
-  ElForm: { template: '<form><slot /></form>' },
-  ElFormItem: { template: '<label><slot /></label>' },
-  ElInput: true,
-  ElInputNumber: true,
-  ElSwitch: true,
-  ElSelect: { template: '<select><slot /></select>' },
-  ElOption: true,
-  ElCheckbox: { template: '<label><slot /></label>' },
+  Badge: { template: '<span><slot /></span>' },
+  Button: { template: '<button><slot /></button>' },
+  ConfirmAction: { template: '<div><slot name="reference" /></div>' },
+  Skeleton: true,
+  Empty: true,
+  FormField: { template: '<label><slot /></label>' },
+  Input: true,
+  InputNumber: true,
+  Switch: true,
+  Checkbox: { template: '<label><slot /></label>' },
 }
 
 beforeEach(() => {
@@ -88,7 +85,7 @@ describe('ProviderSettingsPanel', () => {
         ],
       },
       global: {
-        stubs: elementStubs,
+        stubs: uiStubs,
       },
     })
 
@@ -98,7 +95,7 @@ describe('ProviderSettingsPanel', () => {
     expect(wrapper.text()).toContain('新设置正在等待重启')
     expect(wrapper.text()).toContain('team-model')
     expect(wrapper.text()).toContain('页面保存')
-    expect(wrapper.text()).toContain('Responses 请求格式')
+    expect(wrapper.text()).toContain('OpenAI Responses')
     expect(wrapper.text()).toContain('动手处理（快速） → worker-model')
     expect(wrapper.text()).toContain('智能成员二 → worker-model')
     expect(wrapper.text()).not.toContain('persistent')
@@ -128,7 +125,7 @@ describe('ProviderSettingsPanel', () => {
         logicalModels: ['planner-strong', 'worker-fast'],
         agents: [],
       },
-      global: { stubs: elementStubs },
+      global: { stubs: uiStubs },
     })
 
     await flushPromises()

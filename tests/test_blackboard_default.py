@@ -13,6 +13,7 @@ from test_blackboard_inputs import confirmation, human_request
 from test_blackboard_postgres_runtime import distributed_database as distributed_database
 from test_blackboard_postgres_runtime import distributed_managers as distributed_managers
 from test_blackboard_postgres_runtime import wait_result
+from test_document_deliverables import document_worker as document_worker
 
 from work_harness import cli
 from work_harness.api.app import create_app
@@ -46,7 +47,7 @@ def test_cli_uses_shipped_default_and_keeps_explicit_legacy(project, capsys):
     assert legacy["engine"] == "legacy" and legacy["status"] == "succeeded"
 
 
-async def test_sqlite_api_default_keeps_acceptance_and_explicit_legacy(project):
+async def test_sqlite_api_default_keeps_acceptance_and_explicit_legacy(project, document_worker):
     app = create_app(project)
     async with (
         app.router.lifespan_context(app),

@@ -70,9 +70,7 @@ async def test_provider_sends_schema_and_parses_usage(monkeypatch) -> None:
         )
 
     client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
-    provider = OpenAICompatibleProvider(
-        "compatible", provider_config(), client=client
-    )
+    provider = OpenAICompatibleProvider("compatible", provider_config(), client=client)
     response = await provider.complete(model_request(), model="test-model")
 
     assert response.structured_output == {"ok": True}
@@ -269,9 +267,7 @@ async def test_deepseek_chat_replays_reasoning_content_for_tool_turn(
 async def test_responses_api_converts_messages_tools_and_schema(
     monkeypatch, protocol_variant: str
 ) -> None:
-    monkeypatch.setenv(
-        "TEST_MODEL_BASE_URL", f"https://api.{protocol_variant}.test/v1"
-    )
+    monkeypatch.setenv("TEST_MODEL_BASE_URL", f"https://api.{protocol_variant}.test/v1")
     monkeypatch.setenv("TEST_MODEL_API_KEY", "secret-for-test")
     request_model = model_request().model_copy(
         update={
@@ -495,19 +491,15 @@ async def test_responses_api_normalizes_function_calls(monkeypatch) -> None:
 async def test_provider_maps_http_failures(monkeypatch, status_code, error_type) -> None:
     monkeypatch.setenv("TEST_MODEL_BASE_URL", "https://models.example.test/v1")
     monkeypatch.setenv("TEST_MODEL_API_KEY", "secret-for-test")
-    client = httpx.AsyncClient(
-        transport=httpx.MockTransport(lambda _: httpx.Response(status_code))
-    )
-    provider = OpenAICompatibleProvider(
-        "compatible", provider_config(), client=client
-    )
+    client = httpx.AsyncClient(transport=httpx.MockTransport(lambda _: httpx.Response(status_code)))
+    provider = OpenAICompatibleProvider("compatible", provider_config(), client=client)
     with pytest.raises(error_type):
         await provider.complete(model_request(), model="test-model")
     await client.aclose()
 
 
-def test_provider_blocks_private_endpoint_by_default(monkeypatch) -> None:
+def test_provider_respects_explicit_private_endpoint_restriction(monkeypatch) -> None:
     monkeypatch.setenv("TEST_MODEL_BASE_URL", "https://127.0.0.1/v1")
     monkeypatch.setenv("TEST_MODEL_API_KEY", "secret-for-test")
     with pytest.raises(ValueError, match="private model endpoint"):
-        OpenAICompatibleProvider("compatible", provider_config())
+        OpenAICompatibleProvider("compatible", provider_config(allow_private_network=False))

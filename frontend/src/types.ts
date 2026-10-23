@@ -15,15 +15,10 @@ export interface SkillSelection {
 }
 
 export type RunStatus =
-  | 'pending'
-  | 'running'
-  | 'waiting_human'
-  | 'succeeded'
-  | 'partial'
-  | 'failed'
-  | 'cancelled'
+  'pending' | 'running' | 'waiting_human' | 'succeeded' | 'partial' | 'failed' | 'cancelled'
 
 export interface TaskRequest {
+  model_selection?: ModelSelection | null
   engine?: 'legacy' | 'blackboard'
   blackboard?: BlackboardTaskInput
   goal: string
@@ -203,9 +198,11 @@ export interface ObjectRef {
   revision: number
 }
 
-export type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue }
+export type JsonValue =
+  null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue }
 export type ObjectKind = 'fact' | 'intent' | 'hint'
-export type ClaimType = 'user_statement' | 'file_content' | 'tool_observation' | 'derived' | 'assessment' | 'delivery'
+export type ClaimType =
+  'user_statement' | 'file_content' | 'tool_observation' | 'derived' | 'assessment' | 'delivery'
 
 export interface AcceptanceCriterion {
   id: string
@@ -237,7 +234,10 @@ interface KnowledgeObject {
   topic: string
   tags: string[]
   derived_from: ObjectRef[]
-  links: { relation: 'contributes_to' | 'refines' | 'supports' | 'contradicts' | 'supersedes'; target: ObjectRef }[]
+  links: {
+    relation: 'contributes_to' | 'refines' | 'supports' | 'contradicts' | 'supersedes'
+    target: ObjectRef
+  }[]
   attachments: ContentRef[]
 }
 
@@ -314,7 +314,12 @@ export interface BlackboardSummary {
   evaluated_at: string
   counts: Record<ObjectKind, number>
   root_intent: BlackboardIntent
-  goal: { satisfied: boolean; witnesses: ObjectRef[]; missing_criteria: string[]; conflicts: ObjectRef[] }
+  goal: {
+    satisfied: boolean
+    witnesses: ObjectRef[]
+    missing_criteria: string[]
+    conflicts: ObjectRef[]
+  }
   finalization: BoardFinalization | null
   objects_cursor: string
   event_cursor: string
@@ -333,7 +338,12 @@ export interface BlackboardObjectQuery {
 export interface BlackboardObjectPage {
   board_id: string
   revision: number
-  filters: { kind: ObjectKind | null; status: string | null; topic: string | null; intent_id: string | null }
+  filters: {
+    kind: ObjectKind | null
+    status: string | null
+    topic: string | null
+    intent_id: string | null
+  }
   items: BoardObject[]
   total: number
   limit: number
@@ -350,7 +360,12 @@ export interface BoardEvent {
   requested_changes: { target: ObjectRef; action: string; reason: string }[]
   event_type: 'knowledge' | 'finalized'
   finalization: BoardFinalization | null
-  goal_revision: { target: ObjectRef; objective: string; acceptance: AcceptanceCriterion[]; reason: string } | null
+  goal_revision: {
+    target: ObjectRef
+    objective: string
+    acceptance: AcceptanceCriterion[]
+    reason: string
+  } | null
 }
 
 export interface BlackboardObjectDetail {
@@ -390,7 +405,12 @@ export interface RunList {
     created_at: string
     updated_at: string
     engine: 'legacy' | 'blackboard'
-    execution: { engine: 'legacy' | 'blackboard'; workflow_revision: string; schema_version: number; configuration_fingerprint: string } | null
+    execution: {
+      engine: 'legacy' | 'blackboard'
+      workflow_revision: string
+      schema_version: number
+      configuration_fingerprint: string
+    } | null
   }[]
   limit: number
   offset: number
@@ -439,7 +459,7 @@ export interface ProviderCompatibilityItem {
   provider: string
   adapter: string
   protocol_variant: 'openai' | 'deepseek'
-  api_family: 'chat_completions' | 'responses'
+  api_family: 'chat_completions' | 'responses' | 'messages'
   protocol_version: string
   capabilities: string[]
   configured_capabilities: string[]
@@ -449,12 +469,13 @@ export interface ProviderCompatibilityItem {
 }
 
 export type ProviderProtocolVariant = 'openai' | 'deepseek'
-export type ProviderApiFamily = 'chat_completions' | 'responses'
+export type ProviderApiFamily = 'chat_completions' | 'responses' | 'messages'
 export type ProviderCredentialSource = 'environment' | 'stored'
 
 export interface ProviderConfig {
   adapter: string
   protocol_variant: ProviderProtocolVariant
+  auth_scheme?: 'auto' | 'bearer' | 'x_api_key'
   api_family: ProviderApiFamily
   structured_output_mode: 'json_schema' | 'json_object' | null
   chat_token_parameter: 'max_completion_tokens' | 'max_tokens' | null
@@ -465,11 +486,12 @@ export interface ProviderConfig {
   credential_source: ProviderCredentialSource
   api_key_env: string | null
   allowed_models: string[]
+  model_settings?: Record<string, ModelSettings>
   capabilities: string[]
   timeout_seconds: number
   max_concurrency: number
-  allow_insecure_http: boolean
-  allow_private_network: boolean
+  allow_insecure_http: boolean | null
+  allow_private_network: boolean | null
   options: Record<string, unknown>
 }
 
@@ -573,6 +595,7 @@ export interface WorkflowCapabilities {
 }
 
 export interface CapabilitiesResponse {
+  model_choices?: ModelChoice[]
   workflow?: WorkflowCapabilities
   logical_models: string[]
   tools: string[]
@@ -620,8 +643,11 @@ export interface ChatMessage {
 }
 
 export interface Conversation {
+  modelSelection?: ModelSelection | null
+  pinned?: boolean
   id: string
   title: string
+  titleEdited?: boolean
   taskType: string
   riskLevel: RiskLevel
   allocationMode: AllocationMode
@@ -632,4 +658,51 @@ export interface Conversation {
   messages: ChatMessage[]
   createdAt: string
   updatedAt: string
+}
+
+export interface UpstreamModel {
+  id: string
+  name: string
+}
+export interface ModelDiscoveryResult {
+  items: UpstreamModel[]
+  truncated: boolean
+}
+export interface ModelDiscoveryRequest {
+  config: ProviderProfileSpec['config']
+  provider_name?: string
+  api_key?: string
+  clear_api_key?: boolean
+}
+
+export interface ModelSelection {
+  provider: string
+  model: string
+  reasoning_effort?: string | null
+}
+export interface ModelChoice extends ModelSelection {
+  supported_efforts: string[]
+}
+export interface ReasoningCheck {
+  accepted?: boolean
+  source?: 'default' | 'parameter_validation' | 'channel_confirmation' | 'unknown'
+  effort: string | null
+  status: 'supported' | 'unsupported' | 'unverified' | 'error'
+  detail: string
+}
+export interface ModelVerification {
+  id: string
+  fingerprint: string
+  checked_at: string
+  model_available: boolean
+  checks: ReasoningCheck[]
+}
+export interface ModelSettings {
+  verification: ModelVerification
+  default_effort: string | null
+}
+export interface ModelVerificationRequest extends ModelDiscoveryRequest {
+  confirmed_efforts?: string[]
+  model: string
+  efforts: string[]
 }

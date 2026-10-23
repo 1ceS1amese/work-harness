@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import tempfile
 from collections.abc import Callable
 from pathlib import Path
 from typing import Literal
@@ -10,6 +11,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from work_harness.config.models import AppConfig, RuntimeConfig
+from work_harness.storage.async_utils import settle_before_cancel
 
 PROMPT_NAMES = frozenset(
     {"normalizer", "planner", "worker", "reviewer", "judge", "synthesizer"}
@@ -120,7 +122,8 @@ class ApplicationSettingsStore:
             self._value = ApplicationSettings.model_validate_json(raw)
 
     async def close(self) -> None:
-        return None
+        async with self._write_lock:
+            pass
 
     async def get(self) -> ApplicationSettings:
         return self._value.model_copy(deep=True)
@@ -140,22 +143,33 @@ class ApplicationSettingsStore:
             return await self._save_locked(transform(current))
 
     async def _save_locked(self, value: ApplicationSettings) -> ApplicationSettings:
-        self._value = value.model_copy(deep=True)
-        if self.path is not None:
-            await asyncio.to_thread(self._write_sync, self._value)
-        return self._value.model_copy(deep=True)
+        pending = value.model_copy(deep=True)
+
+        async def persist() -> ApplicationSettings:
+            if self.path is not None:
+                await asyncio.to_thread(self._write_sync, pending)
+            # Publish only after successful persistence, including a cancelled caller's commit.
+            self._value = pending
+            return pending.model_copy(deep=True)
+
+        return await settle_before_cancel(persist())
 
     def _write_sync(self, value: ApplicationSettings) -> None:
         if self.path is None:
             return
-        temporary = self.path.with_name(f".{self.path.name}.tmp")
         payload = json.dumps(
             value.model_dump(mode="json"),
             ensure_ascii=False,
             indent=2,
             sort_keys=True,
         )
-        temporary.write_text(f"{payload}\n", encoding="utf-8")
-        temporary.chmod(0o600)
-        os.replace(temporary, self.path)
-        self.path.chmod(0o600)
+        descriptor, name = tempfile.mkstemp(prefix=f".{self.path.name}.", dir=self.path.parent)
+        try:
+            with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+                stream.write(f"{payload}\n")
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(name, self.path)
+        finally:
+            if os.path.exists(name):
+                os.unlink(name)

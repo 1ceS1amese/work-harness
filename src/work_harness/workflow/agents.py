@@ -124,6 +124,7 @@ class WorkerAgent:
             node_name="worker",
             agent_role=subtask.worker_role,
             logical_model=subtask.logical_model,
+            model_selection=job.task.model_selection,
             messages=[ModelMessage.model_validate(item) for item in state["messages"]],
             required_capabilities={"chat", "structured_output"}
             | set(skill.required_capabilities)

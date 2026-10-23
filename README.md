@@ -79,13 +79,13 @@ Current capabilities include:
   live run updates, and durable blackboard event queries.
 - **Recovery:** SQLite for one application process, or PostgreSQL with separate API and Worker
   processes, durable jobs, leases, cancellation, and failure recovery.
-- **Configurable models:** custom OpenAI-compatible endpoints, Chat Completions and Responses,
+- **Configurable models:** HTTP/HTTPS upstreams, Chat Completions, Responses, Claude Messages, upstream model discovery,
   the DeepSeek protocol dialect, per-Agent routing, prompts, Tools, and Skills.
 - **Legacy compatibility:** the previous planning, execution, review, and synthesis workflow
   remains available through `engine=legacy`.
 
-New runs default to **`blackboard`**. The built-in product catalog currently explores candidate drafts
-and verifies their storage. Domain-specific truth or business actions need matching Tools and
+New runs default to **`blackboard`**. The built-in catalog generates analysis reports, implementation
+plans, and action checklists, checking their storage and section structure. Domain-specific truth or business actions need matching Tools and
 verifiers; model confidence alone does not establish a Fact.
 
 ### Built With
@@ -94,7 +94,7 @@ verifiers; model confidence alone does not establish a Fact.
 | --- | --- |
 | Agent execution | Python, LangGraph |
 | API and contracts | FastAPI, Pydantic |
-| Workbench | Vue 3, TypeScript, Vite, Element Plus |
+| Workbench | Vue 3, Nuxt UI, official Vue Dashboard template, TypeScript, Vite |
 | Persistence | SQLite, PostgreSQL, LangGraph checkpoints |
 | Desktop packaging | pywebview, PyInstaller, Windows WebView2 |
 | Verification | pytest, Vitest, Ruff, GitHub Actions |
@@ -133,9 +133,11 @@ uv run work-harness serve --host 127.0.0.1 --port 8000
 
 Open [the local workbench](http://127.0.0.1:8000/), then:
 
-1. Go to **Settings → Models** and configure your Provider endpoint, credential, and model ID.
-   Choose the API family and structured-output mode supported by your service.
-2. Assign the model to the default group or individual Agents, then save.
+1. Go to **Settings → Model connections**, choose Responses, Chat Completions, or Claude Messages,
+   and enter the upstream URL and API key. Official APIs and compatible new-api/sub2api gateways
+   use the same form; enable HTTP/private network access when needed.
+2. Fetch, search, and select upstream models, then assign a default or per-Agent model.
+   Manual model IDs remain available. Enable the connection and save.
 3. Restart the service to apply staged settings. Model readiness and task admission remain
    unavailable until configuration is usable.
 4. Create a conversation, enter a goal, and explicitly select a completion criterion.
@@ -186,9 +188,10 @@ Choose a goal, completion criteria, and any relevant Skills or Agent assignments
 details to inspect remaining goal gaps, confirmed facts, exploration directions, hints, and their
 relationships. Human input is attached to the relevant Intent and board version.
 
-The built-in **saved candidate draft** criterion verifies that content was saved and can be read.
-It does **not** certify factual accuracy, answer quality, or completion of an external action.
-A free-text goal is never silently converted into that weaker acceptance condition.
+Choose an **analysis report**, **implementation plan**, or **action checklist**. Each choice supplies
+specific content requirements to the Agent and checks stored content and required sections;
+checklists also require task items. These checks do not certify factual accuracy or execution of
+the documented actions. The older `saved-draft` storage-only contract remains available via CLI / API.
 
 Settings are available at `/settings?section=models`, `/settings?section=prompts`, and
 `/settings?section=runtime`. Some prompt and review controls apply to the legacy workflow; blackboard
@@ -199,9 +202,9 @@ Agents retain their own private execution logic.
 With a model configured:
 
 ```bash
-# Default blackboard engine; explicitly accept a stored candidate draft.
+# Default blackboard engine; explicitly choose the document to deliver.
 uv run work-harness run \
-  --goal "Draft a project introduction" --acceptance-template saved-draft
+  --goal "Plan a project rollout for the team" --acceptance-template implementation-plan
 
 # Explicitly select the legacy planning/review workflow.
 uv run work-harness run --engine legacy --goal "Review this delivery plan"
@@ -288,9 +291,12 @@ entry points, knowledge graph, human input, SQLite/PostgreSQL recovery, backup/r
 default-engine switch are implemented. Token accounting has been separated from spending limits.
 The detailed implementation record remains in the [existing design plan](docs/blackboard-design.md).
 
-Source validation covers SQLite and real PostgreSQL 16 API/Worker execution. Backend regression and
-follow-up checks cover accounting, failures, recovery, and compatibility; the latest recorded frontend
-suite has **57 passing tests**, with type checking and a production build completed. A historical
+Backend regression and follow-up checks cover **927 passing cases**, including SQLite and real PostgreSQL 16 API/Worker
+execution, accounting, failures, recovery, and compatibility. Settings reads, history indexing, and
+timeout/cancellation handling have been improved; see the [backend measurements](docs/backend-performance.md). The latest recorded frontend
+suite has **57 passing component/state tests and 38 passing desktop/mobile browser checks**, with type
+checking and a production build completed. The workbench now uses a dark/light task home, searchable
+conversations, a shared Codex-inspired single-sidebar shell for the workspace and settings, one expandable task-settings entry, a bottom-right model selector, per-model reasoning verification in settings, and on-demand blackboard details; see the [GUI design](docs/gui-design.md). A historical
 six-task comparison with `gpt-5.6-sol` passed **6/6** tasks on blackboard and **1/6** on legacy. That is a
 limited benchmark, not a general quality claim, and it predates the latest Token refactor. See the
 [development record](docs/development-status.md) for dates, test runs, and evaluation scope.
@@ -331,6 +337,13 @@ npm --prefix frontend test
 npm --prefix frontend run build
 ```
 
+For browser regression tests (mocked API responses, no model calls), run after building:
+
+```bash
+npm --prefix frontend exec -- playwright install chromium
+npm --prefix frontend run test:e2e
+```
+
 PostgreSQL tests require `WORK_HARNESS_TEST_DATABASE_URL` pointing to a dedicated test database;
 they skip when it is absent. The [contribution guide](CONTRIBUTING.md) covers database, packaging,
 and deployment checks. Report vulnerabilities through the private process in [SECURITY.md](SECURITY.md).
@@ -352,7 +365,8 @@ Distributed under the [MIT License](LICENSE). Copyright © 2026 Work Harness con
 - [Best-README-Template](https://github.com/othneildrew/Best-README-Template) for the README structure.
 - [LangGraph](https://github.com/langchain-ai/langgraph), [FastAPI](https://fastapi.tiangolo.com/), and
   [Pydantic](https://docs.pydantic.dev/) for the execution and API foundations.
-- [Vue](https://vuejs.org/), [Element Plus](https://element-plus.org/),
+- [Official Vue Dashboard template](https://github.com/nuxt-ui-templates/dashboard-vue) ([MIT license](docs/licenses/nuxt-ui-dashboard.txt)).
+- [Vue](https://vuejs.org/), [Nuxt UI](https://ui.nuxt.com/),
   [pywebview](https://pywebview.flowrl.com/), and [PyInstaller](https://pyinstaller.org/) for the workbench
   and desktop tooling.
 

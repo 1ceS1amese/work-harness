@@ -2,26 +2,28 @@ import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import App from './App.vue'
-import { intent } from './test/blackboard'
+import { deliverableTemplates } from './test/deliverables'
 import type { CapabilitiesResponse, WorkflowCapabilities } from './types'
 
 const mocked = vi.hoisted(() => ({
-  health: vi.fn(), capabilities: vi.fn(), createRun: vi.fn(), watchRun: vi.fn(), warning: vi.fn(),
+  health: vi.fn(),
+  capabilities: vi.fn(),
+  createRun: vi.fn(),
+  watchRun: vi.fn(),
+  warning: vi.fn(),
 }))
 vi.mock('./services/api', async (original) => {
   const actual = await original<typeof import('./services/api')>()
   return { ...actual, harnessApi: { ...actual.harnessApi, ...mocked } }
 })
-vi.mock('element-plus', () => ({
-  ElMessage: { warning: mocked.warning, success: vi.fn(), error: vi.fn() },
+vi.mock('./composables/useNotice', () => ({
+  useNotice: () => ({ warning: mocked.warning, success: vi.fn(), error: vi.fn() }),
 }))
 
 const workflow: WorkflowCapabilities = {
-  default_engine: 'blackboard', accept_new_blackboard_runs: true,
-  blackboard_templates: [{
-    id: 'saved-draft', title: '保存候选草稿', description: '草稿已保存；内容准确性仍需核验。',
-    input: { topic: 'document', acceptance: [intent.acceptance[0]!] },
-  }],
+  default_engine: 'blackboard',
+  accept_new_blackboard_runs: true,
+  blackboard_templates: deliverableTemplates,
 }
 
 let wrapper: VueWrapper | undefined
@@ -41,23 +43,35 @@ afterEach(() => {
   wrapper = undefined
   vi.restoreAllMocks()
   vi.unstubAllGlobals()
-  if (scrollToDescriptor) Object.defineProperty(HTMLElement.prototype, 'scrollTo', scrollToDescriptor)
+  if (scrollToDescriptor)
+    Object.defineProperty(HTMLElement.prototype, 'scrollTo', scrollToDescriptor)
   else Reflect.deleteProperty(HTMLElement.prototype, 'scrollTo')
 })
 
 async function render(policy = workflow) {
   mocked.capabilities.mockResolvedValue({
-    workflow: policy, task_types: ['general'], logical_models: [], agents: [], skills: [],
+    workflow: policy,
+    task_types: ['general'],
+    logical_models: [],
+    agents: [],
+    skills: [],
   } satisfies Partial<CapabilitiesResponse>)
   wrapper = mount(App, {
-    global: { stubs: {
-      ChatSidebar: true, RunHistoryDrawer: true, RunDetailsDrawer: true, MessageBubble: true,
-      ElPopover: { template: '<div><slot name="reference" /></div>' },
-      ElDrawer: true, ElDialog: true, ElSwitch: true,
-      ElSelect: { template: '<select><slot /></select>' }, ElOption: { template: '<option><slot /></option>' },
-      ElButton: { template: '<button><slot /></button>' }, ElTag: { template: '<span><slot /></span>' },
-      ElInput: true,
-    } },
+    global: {
+      stubs: {
+        ChatSidebar: true,
+        RunHistoryDrawer: true,
+        RunDetailsDrawer: true,
+        MessageBubble: true,
+        Popover: { template: '<div><slot /><slot name="content" /></div>' },
+        Slideover: true,
+        Modal: true,
+        Switch: true,
+        Button: { template: '<button><slot /></button>' },
+        Badge: { template: '<span><slot /></span>' },
+        Input: true,
+      },
+    },
   })
   await flushPromises()
   return wrapper
@@ -70,19 +84,30 @@ async function send(view: VueWrapper, goal = '起草项目说明') {
 }
 
 describe('chat blackboard admission', () => {
-  it('requires an explicit completion choice and sends those exact criteria', async () => {
+  it.each(deliverableTemplates)('submits the exact criteria for $title', async (template) => {
     const view = await render()
     expect(view.get('select[aria-label="协作方式"]').text()).toContain('跟随项目设置（黑板协作）')
     await send(view)
     expect(mocked.createRun).not.toHaveBeenCalled()
     expect(mocked.warning).toHaveBeenCalledWith('请先选择黑板任务的完成条件。')
-    await view.get('select[aria-label="黑板任务完成条件"]').setValue('saved-draft')
-    expect(view.text()).toContain('内容准确性仍需核验')
+    const select = view.get('select[aria-label="黑板任务完成条件"]')
+    expect(select.findAll('option').map((option) => option.text())).toEqual([
+      '请选择交付物',
+      '分析报告',
+      '实施方案',
+      '操作清单',
+    ])
+    await select.setValue(template.id)
+    expect(view.find('.completion-note').exists()).toBe(false)
     await send(view)
-    expect(mocked.createRun).toHaveBeenCalledWith(expect.objectContaining({
-      goal: '起草项目说明', engine: 'blackboard', blackboard: workflow.blackboard_templates[0]!.input,
-      assignment: expect.objectContaining({ cross_review: false }),
-    }))
+    expect(mocked.createRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        goal: '起草项目说明',
+        engine: 'blackboard',
+        blackboard: template.input,
+        assignment: expect.objectContaining({ cross_review: false }),
+      }),
+    )
   })
 
   it('keeps legacy admission usable when the project defaults to legacy', async () => {

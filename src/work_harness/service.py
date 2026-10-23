@@ -273,6 +273,8 @@ class RunManager:
     async def start(self, request: TaskRequest) -> str:
         run_id = f"run_{uuid4().hex}"
         excluded = {"idempotency_key"}
+        if request.model_selection is None:
+            excluded.add("model_selection")
         if request.engine is None:
             excluded.add("engine")
         if request.blackboard is None:
@@ -296,6 +298,10 @@ class RunManager:
                         "idempotency key was already used with a different request"
                     )
                 return existing.run_id
+        if request.model_selection:
+            selection = self.runtime.model_gateway.resolve_selection(request.model_selection)
+            request = request.model_copy(update={"model_selection": selection})
+            request_payload["model_selection"] = selection.model_dump(mode="json")
         self.runtime.skill_registry.validate_selections(request.skills)
         engine_name = request.engine or self.runtime.config.runtime.workflow.engine
         blackboard = None
@@ -469,6 +475,18 @@ class RunManager:
         # Admission defaults and database placement do not alter a Run's engine.
         # Blackboard execution limits and source choices are in its manifest.
         payload["runtime"].pop("workflow", None)
+        # Refreshing test evidence does not alter model execution. Only effective
+        # defaults belong in the execution identity; omit the new empty field so
+        # runs created before model selection remain recoverable.
+        for provider in payload["models"]["providers"].values():
+            settings = provider.pop("model_settings", {})
+            defaults = {
+                model: {"default_effort": item["default_effort"]}
+                for model, item in settings.items()
+                if item["default_effort"] is not None
+            }
+            if defaults:
+                provider["model_settings"] = defaults
         payload["application_version"] = __version__
         payload["provider_targets"] = self.runtime.provider_target_fingerprints
         revision = BLACKBOARD_WORKFLOW_REVISION if blackboard is not None else WORKFLOW_REVISION
@@ -1253,8 +1271,7 @@ class RunManager:
             cached_tokens=sum(item.cached_tokens for item in model_calls),
             usage_complete=all(item.usage_complete for item in model_calls)
             and not any(
-                e.get("code") in {"run_failed", "run_timeout"}
-                for e in values.get("errors", [])
+                e.get("code") in {"run_failed", "run_timeout"} for e in values.get("errors", [])
             ),
             estimated_cost_usd=sum(item.estimated_cost_usd for item in model_calls),
         )

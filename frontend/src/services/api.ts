@@ -1,3 +1,4 @@
+import type { ModelVerification, ModelVerificationRequest } from '../types'
 import type {
   ApplicationSettingsDescriptor,
   BlackboardContent,
@@ -10,6 +11,8 @@ import type {
   CapabilitiesResponse,
   EditableRuntimeSettings,
   HealthResponse,
+  ModelDiscoveryRequest,
+  ModelDiscoveryResult,
   ProviderList,
   ProviderProfileSpec,
   ProviderSaved,
@@ -156,7 +159,8 @@ async function watchAuthenticatedRun(
       }
       if (done) break
     }
-    if (buffer.trim() && !controller.signal.aborted) dispatchSseBlock(buffer, onRun, onBlackboard, onError)
+    if (buffer.trim() && !controller.signal.aborted)
+      dispatchSseBlock(buffer, onRun, onBlackboard, onError)
     // A reverse proxy can end a streaming response cleanly without surfacing a
     // fetch error. Let the caller fall back to polling unless it deliberately
     // closed the stream after receiving a terminal snapshot.
@@ -180,12 +184,25 @@ function boardPath(runId: string): string {
 }
 
 export const harnessApi = {
+  baseUrl: () => new URL(`${API_BASE}/`, window.location.href).href.replace(/\/$/, ''),
   setApiKey: (value: string) => writeApiKey(value.trim()),
   clearApiKey: () => writeApiKey(''),
   hasApiKey: () => Boolean(readApiKey()),
   health: (signal?: AbortSignal) => request<HealthResponse>('/health', { signal }),
   capabilities: (signal?: AbortSignal) =>
     request<CapabilitiesResponse>('/v1/capabilities', { signal }),
+  discoverModels: (payload: ModelDiscoveryRequest, signal?: AbortSignal) =>
+    request<ModelDiscoveryResult>('/v1/providers/models/discover', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+      signal,
+    }),
+  verifyModel: (payload: ModelVerificationRequest, signal?: AbortSignal) =>
+    request<ModelVerification>('/v1/providers/models/verify', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+      signal,
+    }),
   providers: (signal?: AbortSignal) => request<ProviderList>('/v1/providers', { signal }),
   saveProvider: (name: string, profile: ProviderProfileSpec, signal?: AbortSignal) =>
     request<ProviderSaved>(`/v1/providers/${encodeURIComponent(name)}`, {
@@ -198,18 +215,14 @@ export const harnessApi = {
   settings: (signal?: AbortSignal) =>
     request<ApplicationSettingsDescriptor>('/v1/settings', { signal }),
   savePrompt: (name: string, body: string) =>
-    request<ApplicationSettingsDescriptor>(
-      `/v1/settings/prompts/${encodeURIComponent(name)}`,
-      {
-        method: 'PUT',
-        body: JSON.stringify({ body }),
-      },
-    ),
+    request<ApplicationSettingsDescriptor>(`/v1/settings/prompts/${encodeURIComponent(name)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ body }),
+    }),
   resetPrompt: (name: string) =>
-    request<ApplicationSettingsDescriptor>(
-      `/v1/settings/prompts/${encodeURIComponent(name)}`,
-      { method: 'DELETE' },
-    ),
+    request<ApplicationSettingsDescriptor>(`/v1/settings/prompts/${encodeURIComponent(name)}`, {
+      method: 'DELETE',
+    }),
   saveRuntimeSettings: (settings: EditableRuntimeSettings) =>
     request<ApplicationSettingsDescriptor>('/v1/settings/runtime', {
       method: 'PUT',
@@ -226,26 +239,41 @@ export const harnessApi = {
   listRuns: (offset = 0, signal?: AbortSignal) =>
     request<RunList>(`/v1/runs?limit=20&offset=${offset}`, { signal }),
   blackboard: (runId: string, signal?: AbortSignal, atRevision?: number) =>
-    request<BlackboardSummary>(`${boardPath(runId)}${queryString({ at_revision: atRevision })}`, { signal }),
+    request<BlackboardSummary>(`${boardPath(runId)}${queryString({ at_revision: atRevision })}`, {
+      signal,
+    }),
   blackboardObjects: (runId: string, query: BlackboardObjectQuery, signal?: AbortSignal) =>
     request<BlackboardObjectPage>(`${boardPath(runId)}/objects${queryString(query)}`, { signal }),
-  blackboardObject: (runId: string, ref: { object_id: string; revision: number }, atRevision: number, signal?: AbortSignal) =>
+  blackboardObject: (
+    runId: string,
+    ref: { object_id: string; revision: number },
+    atRevision: number,
+    signal?: AbortSignal,
+  ) =>
     request<BlackboardObjectDetail>(
       `${boardPath(runId)}/objects/${encodeURIComponent(ref.object_id)}${queryString({ object_revision: ref.revision, at_revision: atRevision })}`,
       { signal },
     ),
   blackboardContent: (runId: string, digest: string, atRevision: number, signal?: AbortSignal) =>
-    request<BlackboardContent>(`${boardPath(runId)}/content/${encodeURIComponent(digest)}?at_revision=${atRevision}`, { signal }),
-  blackboardHistory: (runId: string, objectId: string, query: { at_revision?: number; cursor?: string; limit?: number }, signal?: AbortSignal) =>
-    request<BlackboardHistoryPage>(`${boardPath(runId)}/objects/${encodeURIComponent(objectId)}/revisions${queryString(query)}`, { signal }),
-  resumeRun: (runId: string, approved: boolean, note?: string) =>
-    request<{ run_id: string; status: string }>(
-      `/v1/runs/${encodeURIComponent(runId)}/resume`,
-      {
-        method: 'POST',
-        body: JSON.stringify({ approved, note: note || null }),
-      },
+    request<BlackboardContent>(
+      `${boardPath(runId)}/content/${encodeURIComponent(digest)}?at_revision=${atRevision}`,
+      { signal },
     ),
+  blackboardHistory: (
+    runId: string,
+    objectId: string,
+    query: { at_revision?: number; cursor?: string; limit?: number },
+    signal?: AbortSignal,
+  ) =>
+    request<BlackboardHistoryPage>(
+      `${boardPath(runId)}/objects/${encodeURIComponent(objectId)}/revisions${queryString(query)}`,
+      { signal },
+    ),
+  resumeRun: (runId: string, approved: boolean, note?: string) =>
+    request<{ run_id: string; status: string }>(`/v1/runs/${encodeURIComponent(runId)}/resume`, {
+      method: 'POST',
+      body: JSON.stringify({ approved, note: note || null }),
+    }),
   cancelRun: (runId: string) =>
     request<void>(`/v1/runs/${encodeURIComponent(runId)}`, { method: 'DELETE' }),
   watchRun: (

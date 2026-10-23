@@ -63,6 +63,7 @@ class AgentServices:
             node_name=node_name,
             agent_role=agent_role,
             logical_model=logical_model,
+            model_selection=task.get("model_selection"),
             messages=[
                 ModelMessage(role="system", content=prompt.body),
                 ModelMessage(

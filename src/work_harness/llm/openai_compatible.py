@@ -1,16 +1,11 @@
 from __future__ import annotations
 
-import ipaddress
 import json
-import os
-import re
 import time
 from typing import Any
-from urllib.parse import parse_qsl, urlparse, urlunparse
 
 import httpx
 
-from work_harness.config.models import ProviderConfig
 from work_harness.domain.enums import MessageRole
 from work_harness.domain.models import ModelMessage, ModelRequest, ModelResponse, Usage
 from work_harness.llm.base import (
@@ -18,76 +13,14 @@ from work_harness.llm.base import (
     InvalidModelRequestError,
     TransientModelError,
 )
+from work_harness.llm.http_provider import HTTPModelProvider
 
 
-class OpenAICompatibleProvider:
+class OpenAICompatibleProvider(HTTPModelProvider):
     """Custom OpenAI-protocol adapter with an optional DeepSeek dialect."""
 
     capabilities = frozenset({"chat", "structured_output", "tool_calling"})
     protocol_version = "1.0"
-
-    def __init__(
-        self,
-        name: str,
-        config: ProviderConfig,
-        *,
-        client: httpx.AsyncClient | None = None,
-    ) -> None:
-        self.name = name
-        self._config = config
-        env_base_url = os.getenv(config.base_url_env or "", "").strip()
-        self._base_url = (env_base_url or config.base_url or "").rstrip("/")
-        self._api_key = config.runtime_api_key()
-        if self._base_url:
-            self._validate_base_url(self._base_url)
-        self._owns_client = client is None
-        self._client = client or httpx.AsyncClient(
-            timeout=config.timeout_seconds,
-            limits=httpx.Limits(
-                max_connections=config.max_concurrency,
-                max_keepalive_connections=config.max_concurrency,
-            ),
-        )
-
-    def _validate_base_url(self, value: str) -> None:
-        parsed = urlparse(value)
-        allowed_schemes = (
-            {"https", "http"} if self._config.allow_insecure_http else {"https"}
-        )
-        if parsed.scheme not in allowed_schemes:
-            raise ValueError("model base URL must use an allowed HTTP scheme")
-        if not parsed.hostname:
-            raise ValueError("model base URL must include a hostname")
-        if parsed.username or parsed.password:
-            raise ValueError("model base URL cannot contain credentials")
-        for key, _ in parse_qsl(parsed.query, keep_blank_values=True):
-            normalized = key.strip().lower().replace("-", "_")
-            if normalized == "authorization" or normalized.endswith(
-                ("api_key", "token", "secret", "password")
-            ):
-                raise ValueError("model base URL cannot contain credential query fields")
-        try:
-            address = ipaddress.ip_address(parsed.hostname)
-        except ValueError:
-            if parsed.hostname.lower() == "localhost" and not self._config.allow_private_network:
-                raise ValueError(
-                    "localhost model endpoint is blocked by provider policy"
-                ) from None
-        else:
-            if (
-                address.is_private
-                or address.is_loopback
-                or address.is_link_local
-                or address.is_reserved
-            ) and not self._config.allow_private_network:
-                raise ValueError("private model endpoint is blocked by provider policy")
-
-    async def close(self) -> None:
-        if self._owns_client:
-            await self._client.aclose()
-
-    async def healthcheck(self) -> bool:
-        return bool(self._base_url and self._api_key)
 
     async def complete(self, request: ModelRequest, *, model: str) -> ModelResponse:
         if not self._base_url or not self._api_key:
@@ -107,7 +40,8 @@ class OpenAICompatibleProvider:
         try:
             response = await self._client.post(
                 endpoint,
-                headers={"Authorization": f"Bearer {self._api_key}"},
+                headers=self._headers(),
+                follow_redirects=False,
                 json=payload,
             )
         except (httpx.TimeoutException, httpx.TransportError) as exc:
@@ -118,13 +52,6 @@ class OpenAICompatibleProvider:
         if self._config.api_family == "responses":
             return self._parse_responses(data, response, request, model, latency_ms)
         return self._parse_chat(data, response, request, model, latency_ms)
-
-    def _endpoint(self, suffix: str) -> str:
-        """Append an API path without accidentally appending it to a query string."""
-
-        parsed = urlparse(self._base_url)
-        path = f"{parsed.path.rstrip('/')}/{suffix}"
-        return urlunparse(parsed._replace(path=path, fragment=""))
 
     def _chat_payload(self, request: ModelRequest, model: str) -> dict[str, object]:
         messages = [self._chat_message(message) for message in request.messages]
@@ -137,6 +64,8 @@ class OpenAICompatibleProvider:
                 else "max_completion_tokens"
             )
         payload[token_parameter] = request.max_output_tokens
+        if request.reasoning_effort is not None:
+            payload["reasoning_effort"] = request.reasoning_effort
         if request.tools:
             payload["tools"] = request.tools
         if request.response_schema:
@@ -180,6 +109,8 @@ class OpenAICompatibleProvider:
             "max_output_tokens": request.max_output_tokens,
             "store": self._config.store_responses,
         }
+        if request.reasoning_effort is not None:
+            payload["reasoning"] = {"effort": request.reasoning_effort}
         if request.tools:
             payload["tools"] = [self._responses_tool(tool) for tool in request.tools]
         if request.response_schema:
@@ -218,7 +149,10 @@ class OpenAICompatibleProvider:
                     }
                 )
                 continue
-            if message.response_items:
+            if message.response_items and not any(
+                item.get("type") in {"text", "tool_use", "thinking", "redacted_thinking"}
+                for item in message.response_items
+            ):
                 inputs.extend(dict(item) for item in message.response_items)
                 continue
             if message.content:
@@ -390,92 +324,3 @@ class OpenAICompatibleProvider:
             model=model,
             provider_request_id=self._request_id(response, data),
         )
-
-    @staticmethod
-    def _usage_fields(usage, input_key, output_key, details) -> dict[str, Any]:
-        # Missing, null or malformed provider counts are unknown, never evidence of zero use.
-        def valid(value):
-            return type(value) is int and value >= 0
-
-        input_count, output_count = usage.get(input_key), usage.get(output_key)
-        cached = details.get("cached_tokens", 0)
-        complete = valid(input_count) and valid(output_count)
-        cache_valid = valid(cached) and valid(input_count) and cached <= input_count
-        return {
-            "input_tokens": input_count if valid(input_count) else 0,
-            "output_tokens": output_count if valid(output_count) else 0,
-            "cached_tokens": cached if cache_valid else 0,
-            "usage_complete": complete and cache_valid,
-        }
-
-    @staticmethod
-    def _structured_output(
-        request: ModelRequest, parsed: Any, content: str
-    ) -> dict[str, Any] | None:
-        if request.response_schema is None:
-            return None
-        if isinstance(parsed, dict):
-            return parsed
-        if not content:
-            return None
-        try:
-            value = json.loads(content)
-        except json.JSONDecodeError as exc:
-            raise InvalidModelRequestError(
-                "provider returned invalid structured output"
-            ) from exc
-        if not isinstance(value, dict):
-            raise InvalidModelRequestError("provider structured output must be an object")
-        return value
-
-    @staticmethod
-    def _json_envelope(response: httpx.Response) -> dict[str, Any]:
-        try:
-            data = response.json()
-        except ValueError as exc:
-            raise InvalidModelRequestError("provider returned a non-JSON response") from exc
-        if not isinstance(data, dict):
-            raise InvalidModelRequestError("provider returned an invalid response envelope")
-        return data
-
-    @staticmethod
-    def _raise_for_status(response: httpx.Response) -> None:
-        if response.status_code in {401, 403}:
-            raise AuthenticationModelError("model provider authentication failed")
-        if response.status_code in {408, 409, 429} or response.status_code >= 500:
-            raise TransientModelError(
-                f"model provider temporary failure: {response.status_code}"
-            )
-        if response.status_code >= 400:
-            raise InvalidModelRequestError(
-                f"model request rejected: {response.status_code}"
-            )
-
-    @staticmethod
-    def _request_id(response: httpx.Response, data: dict[str, Any]) -> str | None:
-        header_id = response.headers.get("x-request-id") or response.headers.get(
-            "x-ds-request-id"
-        )
-        response_id = data.get("id")
-        return header_id or (response_id if isinstance(response_id, str) else None)
-
-    @staticmethod
-    def _schema_name(request: ModelRequest) -> str:
-        value = re.sub(r"[^A-Za-z0-9_-]", "_", request.node_name)[:64]
-        return value or "structured_output"
-
-    def _json_schema_format(self, request: ModelRequest) -> dict[str, object]:
-        return {
-            "name": self._schema_name(request),
-            "strict": True,
-            "schema": request.response_schema or {},
-        }
-
-    def _schema_instruction(self, request: ModelRequest) -> str:
-        schema = json.dumps(
-            request.response_schema or {},
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
-        )
-        return f"Return only one valid json object matching this JSON Schema: {schema}"

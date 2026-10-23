@@ -12,6 +12,8 @@ from typing import Annotated, Any, Literal
 from uuid import UUID
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response, status
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
@@ -23,14 +25,26 @@ from work_harness.api.middleware import RequestGuardMiddleware
 from work_harness.blackboard.inputs import HumanInput, HumanInputResult
 from work_harness.blackboard.protocol import BlackboardError
 from work_harness.config.models import AppConfig, ProviderConfig
+from work_harness.config.reasoning import ModelVerification
 from work_harness.domain.enums import AgentFunction, RunStatus
 from work_harness.domain.models import RunResult, TaskRequest
-from work_harness.knowledge_sources.catalog import draft_task_input
+from work_harness.knowledge_sources.deliverables import deliverable_templates
+from work_harness.llm.base import (
+    AuthenticationModelError,
+    InvalidModelRequestError,
+    TransientModelError,
+)
+from work_harness.llm.discovery import (
+    ModelDiscoveryRequest,
+    ModelDiscoveryResult,
+    discover_models,
+)
 from work_harness.llm.profiles import (
     apply_provider_profiles,
     provider_agent_bindings,
     provider_model_bindings,
 )
+from work_harness.llm.verification import ModelVerificationRequest, VerificationCache, verify_model
 from work_harness.prompts import PromptRegistry
 from work_harness.runtime import HarnessRuntime, build_runtime
 from work_harness.service import (
@@ -193,6 +207,9 @@ class FrontendStaticFiles(StaticFiles):
 
 
 def create_app(project_root: Path | str | None = None) -> FastAPI:
+    provider_settings_lock = asyncio.Lock()
+    verification_cache = VerificationCache()
+    verification_slots = asyncio.Semaphore(1)
     state_holder = AppState()
 
     @asynccontextmanager
@@ -246,6 +263,21 @@ def create_app(project_root: Path | str | None = None) -> FastAPI:
         rate_limit_per_minute=preview.api.rate_limit_per_minute,
     )
     app.include_router(blackboard_router(lambda: state_holder.runs))
+
+    @app.exception_handler(RequestValidationError)
+    async def validation_error(request: Request, exc: RequestValidationError) -> Response:
+        if request.url.path.startswith("/v1/providers"):
+            # Pydantic's input/ctx can contain the complete connection payload and key.
+            return JSONResponse(
+                status_code=422,
+                content={
+                    "detail": [
+                        {key: error[key] for key in ("loc", "msg", "type")}
+                        for error in exc.errors()
+                    ]
+                },
+            )
+        return await request_validation_exception_handler(request, exc)
 
     @app.get("/health/live", include_in_schema=False)
     async def liveness() -> dict[str, str]:
@@ -363,7 +395,7 @@ def create_app(project_root: Path | str | None = None) -> FastAPI:
         config: ProviderConfig,
         profile: ProviderProfileRecord | None,
     ) -> tuple[bool | None, bool | None]:
-        if config.adapter != "openai_compatible":
+        if config.adapter not in {"openai_compatible", "anthropic"}:
             return None, None
         endpoint = bool(
             (config.base_url_env and os.getenv(config.base_url_env, "").strip()) or config.base_url
@@ -379,8 +411,11 @@ def create_app(project_root: Path | str | None = None) -> FastAPI:
         profiles = await state_holder.runtime.provider_store.list()
         profiles_by_name = {item.name: item for item in profiles}
         persisted_names = {item.name for item in profiles}
-        base = load_app_config(state_holder.runtime.config.project_root)
-        configured = apply_provider_profiles(base, profiles)
+        configured = await asyncio.to_thread(
+            lambda: apply_provider_profiles(
+                load_app_config(state_holder.runtime.config.project_root), profiles
+            )
+        )
         loaded = state_holder.runtime.config
         names = sorted(set(configured.models.providers) | set(loaded.models.providers))
         items: list[ProviderDescriptor] = []
@@ -446,6 +481,9 @@ def create_app(project_root: Path | str | None = None) -> FastAPI:
 
     async def application_settings_state() -> ApplicationSettingsDescriptor:
         saved = await state_holder.runtime.settings_store.get()
+        return await asyncio.to_thread(describe_application_settings, saved)
+
+    def describe_application_settings(saved: ApplicationSettings) -> ApplicationSettingsDescriptor:
         loaded = state_holder.runtime.settings_snapshot
         base = load_app_config(state_holder.runtime.config.project_root)
         runtime_settings = saved.runtime or EditableRuntimeSettings.from_runtime(base.runtime)
@@ -493,18 +531,9 @@ def create_app(project_root: Path | str | None = None) -> FastAPI:
                 "accept_new_blackboard_runs": (
                     state_holder.runtime.config.runtime.workflow.accept_new_blackboard_runs
                 ),
-                "blackboard_templates": [
-                    {
-                        "id": "saved-draft",
-                        "title": "保存候选草稿",
-                        "description": (
-                            "完成条件是草稿已保存且可读取；"
-                            "内容准确性与实际任务结果仍需核验。"
-                        ),
-                        "input": draft_task_input().model_dump(mode="json"),
-                    }
-                ],
+                "blackboard_templates": deliverable_templates(),
             },
+            "model_choices": state_holder.runtime.model_gateway.model_choices(),
             "logical_models": state_holder.runtime.model_gateway.logical_models,
             "tools": state_holder.runtime.tool_registry.names,
             "tool_adapters": state_holder.runtime.tool_adapters.adapters,
@@ -605,10 +634,63 @@ def create_app(project_root: Path | str | None = None) -> FastAPI:
             ],
         }
 
+    @app.get("/v1/models")
+    async def selectable_models() -> dict[str, Any]:
+        return {"items": state_holder.runtime.model_gateway.model_choices()}
+
+    @app.post("/v1/providers/models/verify", response_model=ModelVerification)
+    async def verify_provider_model(request: ModelVerificationRequest) -> ModelVerification:
+        require_local_mutable_settings()
+        config = request.config.model_copy(deep=True)
+        if config.credential_source == "stored":
+            key = request.api_key.get_secret_value() if request.api_key else None
+            if not key and request.provider_name and not request.clear_api_key:
+                key = await state_holder.runtime.provider_store.get_api_key(request.provider_name)
+            config.set_runtime_api_key(key)
+        try:
+            # Include slot waiting in the deadline; no unbounded probe queue or retries.
+            async with asyncio.timeout(180):
+                async with verification_slots:
+                    result = await verify_model(
+                        config,
+                        request.model,
+                        request.efforts,
+                        **(
+                            {"confirmed_efforts": request.confirmed_efforts}
+                            if request.confirmed_efforts
+                            else {}
+                        ),
+                    )
+            verification_cache.add(result)
+            return result
+        except TimeoutError as exc:
+            raise HTTPException(504, "模型测试超时，请稍后重试") from exc
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+
     @app.get("/v1/providers", response_model=ProviderList)
     async def list_providers() -> ProviderList:
         result, _ = await provider_state()
         return result
+
+    @app.post("/v1/providers/models/discover", response_model=ModelDiscoveryResult)
+    async def provider_models(request: ModelDiscoveryRequest) -> ModelDiscoveryResult:
+        require_local_mutable_settings()
+        config = request.config.model_copy(deep=True)
+        if config.credential_source == "stored":
+            key = request.api_key.get_secret_value() if request.api_key else None
+            if not key and request.provider_name and not request.clear_api_key:
+                key = await state_holder.runtime.provider_store.get_api_key(request.provider_name)
+            config.set_runtime_api_key(key)
+        try:
+            return await discover_models(config)
+        except AuthenticationModelError as exc:
+            # Upstream authentication is separate from the Work Harness session.
+            raise HTTPException(422, "上游鉴权失败，请检查模型服务密钥和鉴权方式") from exc
+        except TransientModelError as exc:
+            raise HTTPException(502, "上游暂时不可用，请检查网络或稍后重试") from exc
+        except (InvalidModelRequestError, ValueError) as exc:
+            raise HTTPException(422, str(exc)) from exc
 
     @app.put("/v1/providers/{provider_name}", response_model=ProviderSaved)
     async def save_provider(
@@ -616,62 +698,83 @@ def create_app(project_root: Path | str | None = None) -> FastAPI:
         request: ProviderSaveRequest,
     ) -> ProviderSaved:
         require_local_mutable_settings()
-        existing = await state_holder.runtime.provider_store.list()
-        prospective = [item for item in existing if item.name != provider_name]
-        previous = next((item for item in existing if item.name == provider_name), None)
-        api_key = request.api_key.get_secret_value() if request.api_key else None
-        clear_api_key = request.clear_api_key or request.config.credential_source != "stored"
-        credential_configured = bool(api_key) or bool(
-            previous and previous.credential_configured and not clear_api_key
-        )
-        if (
-            request.config.adapter == "openai_compatible"
-            and request.config.enabled
-            and request.config.credential_source == "stored"
-            and not credential_configured
-        ):
-            raise HTTPException(
-                status_code=409,
-                detail="enabled stored credential Provider requires an API Key",
+        async with provider_settings_lock:
+            existing = await state_holder.runtime.provider_store.list()
+            prospective = [item for item in existing if item.name != provider_name]
+            previous = next((item for item in existing if item.name == provider_name), None)
+            api_key = request.api_key.get_secret_value() if request.api_key else None
+            clear_api_key = request.clear_api_key or request.config.credential_source != "stored"
+            credential_configured = bool(api_key) or bool(
+                previous and previous.credential_configured and not clear_api_key
             )
-        profile = request.profile_spec()
-        try:
-            prospective.append(
-                ProviderProfileRecord(
-                    name=provider_name,
-                    config=profile.config,
-                    model_bindings=profile.model_bindings,
-                    agent_bindings=profile.agent_bindings,
+            if (
+                request.config.adapter in {"openai_compatible", "anthropic"}
+                and request.config.enabled
+                and request.config.credential_source == "stored"
+                and not credential_configured
+            ):
+                raise HTTPException(
+                    status_code=409,
+                    detail="enabled stored credential Provider requires an API Key",
                 )
-            )
-            base = load_app_config(state_holder.runtime.config.project_root)
-            apply_provider_profiles(base, prospective)
-            await state_holder.runtime.provider_store.upsert(
-                provider_name,
-                profile,
-                api_key=api_key,
-                clear_api_key=clear_api_key,
-            )
-        except ValueError as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
-        result, _ = await provider_state()
-        saved = next(item for item in result.items if item.name == provider_name)
-        return ProviderSaved(provider=saved, restart_required=result.restart_required)
+            profile = request.profile_spec()
+            verification_config = profile.config.model_copy(deep=True)
+            if verification_config.credential_source == "stored":
+                verification_config.set_runtime_api_key(
+                    api_key
+                    or (
+                        await state_holder.runtime.provider_store.get_api_key(provider_name)
+                        if not clear_api_key
+                        else None
+                    )
+                )
+            try:
+                verification_cache.validate(
+                    verification_config, previous.config if previous else None
+                )
+                prospective.append(
+                    ProviderProfileRecord(
+                        name=provider_name,
+                        config=profile.config,
+                        model_bindings=profile.model_bindings,
+                        agent_bindings=profile.agent_bindings,
+                    )
+                )
+                await asyncio.to_thread(
+                    lambda: apply_provider_profiles(
+                        load_app_config(state_holder.runtime.config.project_root), prospective
+                    )
+                )
+                await state_holder.runtime.provider_store.upsert(
+                    provider_name,
+                    profile,
+                    api_key=api_key,
+                    clear_api_key=clear_api_key,
+                )
+            except ValueError as exc:
+                raise HTTPException(status_code=409, detail=str(exc)) from exc
+            result, _ = await provider_state()
+            saved = next(item for item in result.items if item.name == provider_name)
+            return ProviderSaved(provider=saved, restart_required=result.restart_required)
 
     @app.delete("/v1/providers/{provider_name}", status_code=status.HTTP_204_NO_CONTENT)
     async def delete_provider(provider_name: str) -> Response:
         require_local_mutable_settings()
-        existing = await state_holder.runtime.provider_store.list()
-        prospective = [item for item in existing if item.name != provider_name]
-        try:
-            base = load_app_config(state_holder.runtime.config.project_root)
-            apply_provider_profiles(base, prospective)
-            await state_holder.runtime.provider_store.delete(provider_name)
-        except ProviderProfileStoreNotFoundError as exc:
-            raise HTTPException(status_code=404, detail="provider profile not found") from exc
-        except ValueError as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
-        return Response(status_code=status.HTTP_204_NO_CONTENT)
+        async with provider_settings_lock:
+            existing = await state_holder.runtime.provider_store.list()
+            prospective = [item for item in existing if item.name != provider_name]
+            try:
+                await asyncio.to_thread(
+                    lambda: apply_provider_profiles(
+                        load_app_config(state_holder.runtime.config.project_root), prospective
+                    )
+                )
+                await state_holder.runtime.provider_store.delete(provider_name)
+            except ProviderProfileStoreNotFoundError as exc:
+                raise HTTPException(status_code=404, detail="provider profile not found") from exc
+            except ValueError as exc:
+                raise HTTPException(status_code=409, detail=str(exc)) from exc
+            return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     @app.get("/v1/settings", response_model=ApplicationSettingsDescriptor)
     async def get_application_settings() -> ApplicationSettingsDescriptor:
@@ -721,9 +824,10 @@ def create_app(project_root: Path | str | None = None) -> FastAPI:
     ) -> ApplicationSettingsDescriptor:
         require_local_mutable_settings()
 
+        base = await asyncio.to_thread(load_app_config, state_holder.runtime.config.project_root)
+
         def update_runtime(current: ApplicationSettings) -> ApplicationSettings:
             prospective = ApplicationSettings(prompts=current.prompts, runtime=request)
-            base = load_app_config(state_holder.runtime.config.project_root)
             apply_application_settings(base, prospective)
             return prospective
 

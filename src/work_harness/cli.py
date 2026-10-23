@@ -12,6 +12,7 @@ from pathlib import Path
 from work_harness.config.loader import default_project_root, load_app_config
 from work_harness.domain.models import BlackboardTaskInput, SkillSelection, TaskRequest
 from work_harness.evaluation import prepare_comparison, run_evaluation, save_report
+from work_harness.knowledge_sources.deliverables import DELIVERABLE_TEMPLATES
 from work_harness.runtime import build_runtime
 from work_harness.service import RunManager
 
@@ -31,8 +32,8 @@ def build_parser() -> argparse.ArgumentParser:
     acceptance = run.add_mutually_exclusive_group()
     acceptance.add_argument(
         "--acceptance-template",
-        choices=["saved-draft"],
-        help="Explicitly accept a saved candidate draft; does not certify accuracy or completion",
+        choices=[*(template.id for template in DELIVERABLE_TEMPLATES), "saved-draft"],
+        help="Choose a document deliverable; saved-draft preserves the older storage-only check",
     )
     acceptance.add_argument(
         "--blackboard-spec",
@@ -99,9 +100,9 @@ async def _run_task(args: argparse.Namespace) -> int:
     engine = args.engine or config.runtime.workflow.engine
     blackboard = None
     if args.acceptance_template:
-        from work_harness.knowledge_sources.catalog import draft_task_input
+        from work_harness.knowledge_sources.catalog import acceptance_task_input
 
-        blackboard = draft_task_input()
+        blackboard = acceptance_task_input(args.acceptance_template)
     elif args.blackboard_spec:
         blackboard = BlackboardTaskInput.model_validate_json(
             args.blackboard_spec.read_text(encoding="utf-8")
@@ -109,7 +110,7 @@ async def _run_task(args: argparse.Namespace) -> int:
     if engine == "blackboard" and blackboard is None:
         raise ValueError(
             "blackboard runs require --blackboard-spec or an explicit --acceptance-template; "
-            "saved-draft only verifies that a candidate was saved"
+            "choose analysis-report, implementation-plan or action-checklist"
         )
     if engine == "legacy" and blackboard is not None:
         raise ValueError("blackboard acceptance requires --engine blackboard")

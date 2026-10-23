@@ -7,6 +7,7 @@ import asyncio
 import httpx
 import pytest
 from test_backup_restore import project as project
+from test_document_deliverables import document_worker as document_worker
 
 from work_harness.api.app import create_app
 
@@ -15,7 +16,7 @@ from work_harness.api.app import create_app
     "default_engine,enabled", [("legacy", True), ("blackboard", True), ("blackboard", False)]
 )
 async def test_capabilities_follow_default_and_rollback_policy(
-    project, monkeypatch, default_engine, enabled
+    project, monkeypatch, default_engine, enabled, document_worker
 ):
     monkeypatch.setenv("WORK_HARNESS_WORKFLOW_ENGINE", default_engine)
     monkeypatch.setenv("WORK_HARNESS_ACCEPT_NEW_BLACKBOARD_RUNS", str(enabled).lower())
@@ -28,7 +29,7 @@ async def test_capabilities_follow_default_and_rollback_policy(
         assert workflow["default_engine"] == default_engine
         assert workflow["accept_new_blackboard_runs"] is enabled
         template = workflow["blackboard_templates"][0]
-        assert template["id"] == "saved-draft" and "仍需核验" in template["description"]
+        assert template["id"] == "analysis-report" and template["title"] == "分析报告"
         if default_engine == "blackboard":
             missing = await client.post("/v1/runs", json={"goal": "核验外部事实"})
             assert missing.status_code == 422
@@ -57,4 +58,4 @@ async def test_capabilities_follow_default_and_rollback_policy(
         if enabled:
             board = (await client.get(f"/v1/runs/{run_id}/blackboard")).json()
             assert board["root_intent"]["acceptance"] == template["input"]["acceptance"]
-            assert "尚未核验" in result["output"]
+            assert "分析报告已交付" in result["output"]

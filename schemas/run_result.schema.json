@@ -417,6 +417,41 @@
       "title": "ModelCallRecord",
       "type": "object"
     },
+    "ModelSelection": {
+      "additionalProperties": false,
+      "properties": {
+        "provider": {
+          "pattern": "^[a-z][a-z0-9_-]{1,63}$",
+          "title": "Provider",
+          "type": "string"
+        },
+        "model": {
+          "maxLength": 512,
+          "minLength": 1,
+          "title": "Model",
+          "type": "string"
+        },
+        "reasoning_effort": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z][a-z0-9_-]{0,31}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reasoning Effort"
+        }
+      },
+      "required": [
+        "provider",
+        "model"
+      ],
+      "title": "ModelSelection",
+      "type": "object"
+    },
     "ObjectRef": {
       "additionalProperties": false,
       "properties": {
@@ -803,6 +838,17 @@
           "minLength": 1,
           "title": "Goal",
           "type": "string"
+        },
+        "model_selection": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ModelSelection"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "context": {
           "additionalProperties": true,

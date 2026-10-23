@@ -1,35 +1,27 @@
 import { defineConfig } from 'vitest/config'
 import vue from '@vitejs/plugin-vue'
-import AutoImport from 'unplugin-auto-import/vite'
-import Components from 'unplugin-vue-components/vite'
-import { ElementPlusResolver } from 'unplugin-vue-components/resolvers'
+import ui from '@nuxt/ui/vite'
 
-export default defineConfig(({ mode }) => {
-  return {
-    plugins:
-      mode === 'test'
-        ? [vue()]
-        : [
-            vue(),
-            AutoImport({
-              dts: 'src/auto-imports.d.ts',
-              resolvers: [ElementPlusResolver()],
-            }),
-            Components({
-              dts: 'src/components.d.ts',
-              resolvers: [ElementPlusResolver()],
-            }),
-          ],
-    server: {
-      port: 5173,
-      strictPort: true,
-      proxy: {
-        '/health': 'http://127.0.0.1:8000',
-        '/v1': 'http://127.0.0.1:8000',
-      },
-    },
-    test: {
-      environment: 'jsdom',
-    },
-  }
+export default defineConfig({
+  plugins: [
+    vue(),
+    ui({
+      router: false,
+      colorMode: false,
+      icon: { clientBundle: { scan: true } },
+      components: { dts: 'src/components.d.ts' },
+      autoImport: { dts: 'src/auto-imports.d.ts' },
+      ui: { colors: { primary: 'emerald', neutral: 'neutral' } },
+    }),
+  ],
+  server: {
+    port: 5173,
+    strictPort: true,
+    proxy: { '/health': 'http://127.0.0.1:8000', '/v1': 'http://127.0.0.1:8000' },
+  },
+  test: {
+    include: ['src/**/*.test.ts'],
+    environment: 'jsdom',
+    setupFiles: ['./src/test/setup.ts'],
+  },
 })

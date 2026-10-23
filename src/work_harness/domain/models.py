@@ -154,8 +154,15 @@ class BlackboardTaskInput(ContractModel):
         return value
 
 
+class ModelSelection(ContractModel):
+    provider: str = Field(pattern=r"^[a-z][a-z0-9_-]{1,63}$")
+    model: str = Field(min_length=1, max_length=512)
+    reasoning_effort: str | None = Field(default=None, pattern=r"^[a-z][a-z0-9_-]{0,31}$")
+
+
 class TaskRequest(ContractModel):
     goal: str = Field(min_length=1, max_length=20_000)
+    model_selection: ModelSelection | None = None
     context: dict[str, Any] = Field(default_factory=dict)
     constraints: list[str] = Field(default_factory=list, max_length=50)
     expected_output: str | None = Field(default=None, max_length=4_000)
@@ -187,6 +194,7 @@ class TaskRequest(ContractModel):
 class TaskSpec(ContractModel):
     task_id: str = Field(default_factory=lambda: f"task_{uuid4().hex}")
     goal: str = Field(min_length=1, max_length=20_000)
+    model_selection: ModelSelection | None = None
     context: dict[str, Any] = Field(default_factory=dict)
     constraints: list[str] = Field(default_factory=list)
     expected_output: str | None = None
@@ -353,6 +361,8 @@ class ModelRequest(ContractModel):
     node_name: str
     agent_role: str
     logical_model: str
+    model_selection: ModelSelection | None = None
+    reasoning_effort: str | None = Field(default=None, pattern=r"^[a-z][a-z0-9_-]{0,31}$")
     messages: list[ModelMessage] = Field(min_length=1)
     required_capabilities: set[str] = Field(default_factory=lambda: {"chat"})
     provider_preferences: list[str] = Field(default_factory=list)

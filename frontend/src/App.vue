@@ -10,14 +10,14 @@ import {
   shallowRef,
   watch,
 } from 'vue'
-import { Connection, EditPen, Lock, Refresh, Setting } from '@element-plus/icons-vue'
-import { ElMessage } from 'element-plus'
+import { useNotice } from './composables/useNotice'
 
 import ChatSidebar from './components/ChatSidebar.vue'
 import ComposerBox from './components/ComposerBox.vue'
 import GroupChatLayout from './components/GroupChatLayout.vue'
+import ComposerModelSelect from './components/ComposerModelSelect.vue'
+import type { ModelChoice, ModelSelection } from './types'
 import MessageBubble from './components/MessageBubble.vue'
-import RunDetailsDrawer from './components/RunDetailsDrawer.vue'
 import RunHistoryDrawer from './components/RunHistoryDrawer.vue'
 import RunModeOptions from './components/RunModeOptions.vue'
 import { useConversations } from './composables/useConversations'
@@ -36,8 +36,11 @@ import type {
 } from './types'
 import { effectiveEngine, executionInput, legacyWorkflow, type RunMode } from './utils/admission'
 import { ACTIVE_RUN_STATUSES, resultMessage } from './utils/run'
-import { taskTypeLabel } from './utils/labels'
+import WelcomeHero from './components/WelcomeHero.vue'
 
+const notice = useNotice()
+
+const RunDetailsDrawer = defineAsyncComponent(() => import('./components/RunDetailsDrawer.vue'))
 const SettingsPage = defineAsyncComponent(() => import('./components/SettingsPage.vue'))
 const historyOpen = ref(false)
 let detailRequest: AbortController | undefined
@@ -47,6 +50,8 @@ const {
   activeId,
   activeConversation,
   createConversation,
+  updateConversation,
+  renameConversation,
   selectConversation,
   deleteConversation,
   addMessage,
@@ -62,7 +67,9 @@ const sending = ref(false)
 const workflow = shallowRef<WorkflowCapabilities>(legacyWorkflow)
 const runMode = ref<RunMode>('default')
 const acceptanceTemplate = ref('')
-const blackboardMode = computed(() => effectiveEngine(runMode.value, workflow.value) === 'blackboard')
+const blackboardMode = computed(
+  () => effectiveEngine(runMode.value, workflow.value) === 'blackboard',
+)
 watch(activeId, () => {
   runMode.value = 'default'
   acceptanceTemplate.value = ''
@@ -137,7 +144,7 @@ const currentPage = ref<'chat' | 'settings'>(
 )
 const settingsSection = ref<SettingsSection>(readSettingsSection())
 
-const dark = ref(localStorage.getItem('work-harness:theme') === 'dark')
+const dark = ref(localStorage.getItem('work-harness:theme') !== 'light')
 
 function readSettingsSection(): SettingsSection {
   const section = new URLSearchParams(window.location.search).get('section')
@@ -145,6 +152,7 @@ function readSettingsSection(): SettingsSection {
 }
 
 function openSettings(section: SettingsSection = 'models'): void {
+  mobileMenuOpen.value = false
   currentPage.value = 'settings'
   settingsSection.value = section
   window.history.pushState({}, '', `/settings?section=${section}`)
@@ -221,20 +229,20 @@ const skillSelections = computed({
   get: () => activeConversation.value.skillSelections,
   set: (value: SkillSelection[]) => setSkillSelections(value),
 })
-const groupAgents = computed(() => {
-  return selectedAgentIds.value
-    .map((id) => agents.value.find((agent) => agent.id === id))
-    .filter((agent): agent is AgentDescriptor => Boolean(agent))
+const modelChoices = ref<ModelChoice[]>([])
+const modelSelection = computed({
+  get: () => activeConversation.value.modelSelection ?? null,
+  set: (value: ModelSelection | null) =>
+    updateConversation(activeConversation.value.id, { modelSelection: value }),
 })
 const selectedRun = computed(() =>
-  selectedRunId.value ? runResults[selectedRunId.value] ?? null : null,
+  selectedRunId.value ? (runResults[selectedRunId.value] ?? null) : null,
 )
 const activeRunMessage = computed<ChatMessage | undefined>(() =>
   [...activeConversation.value.messages]
     .reverse()
     .find(
-      (message) =>
-        message.runId && message.status && ACTIVE_RUN_STATUSES.includes(message.status),
+      (message) => message.runId && message.status && ACTIVE_RUN_STATUSES.includes(message.status),
     ),
 )
 const connectionLabel = computed(() => {
@@ -248,12 +256,20 @@ const connectionLabel = computed(() => {
 function applyTheme(): void {
   document.documentElement.dataset.theme = dark.value ? 'dark' : 'light'
   document.documentElement.classList.toggle('dark', dark.value)
+  document
+    .querySelector('meta[name="theme-color"]')
+    ?.setAttribute('content', dark.value ? '#181818' : '#ffffff')
   localStorage.setItem('work-harness:theme', dark.value ? 'dark' : 'light')
 }
 
 function toggleTheme(): void {
   dark.value = !dark.value
   applyTheme()
+}
+
+function openHistory(): void {
+  historyOpen.value = true
+  mobileMenuOpen.value = false
 }
 
 function showNewConversation(): void {
@@ -267,9 +283,18 @@ function chooseConversation(id: string): void {
   mobileMenuOpen.value = false
 }
 
+function togglePinConversation(id: string): void {
+  const target = conversations.value.find((item) => item.id === id)
+  if (!target) return
+  updateConversation(id, { pinned: !target.pinned })
+}
+
 async function scrollToLatest(): Promise<void> {
   await nextTick()
-  conversationPane.value?.scrollTo({ top: conversationPane.value.scrollHeight, behavior: 'smooth' })
+  conversationPane.value?.scrollTo({
+    top: conversationPane.value.scrollHeight,
+    behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth',
+  })
 }
 
 function findMessageByRun(runId: string): { conversationId: string; messageId: string } | null {
@@ -376,6 +401,7 @@ async function checkConnection(): Promise<boolean> {
     if (capabilities.functions?.length > 0) agentFunctions.value = capabilities.functions
     if (capabilities.agents.length > 0) agents.value = capabilities.agents
     skills.value = capabilities.skills ?? []
+    modelChoices.value = capabilities.model_choices ?? []
     workflow.value = capabilities.workflow ?? legacyWorkflow
     return true
   } catch (error) {
@@ -394,7 +420,7 @@ function openAuthDialog(): void {
 async function submitApiKey(): Promise<void> {
   const value = apiKeyInput.value.trim()
   if (!value) {
-    ElMessage.warning('请输入部署 API Key')
+    notice.warning('请输入工作台访问密钥')
     return
   }
   authenticating.value = true
@@ -405,12 +431,12 @@ async function submitApiKey(): Promise<void> {
   if (connected) {
     apiKeyInput.value = ''
     authDialogOpen.value = false
-    ElMessage.success('身份验证成功')
+    notice.success('身份验证成功')
     return
   }
   harnessApi.clearApiKey()
   apiKeyConfigured.value = false
-  if (backendState.value === 'auth') ElMessage.error('API Key 无效')
+  if (backendState.value === 'auth') notice.error('API Key 无效')
 }
 
 function clearApiKey(): void {
@@ -427,7 +453,7 @@ async function refreshActiveConversation(): Promise<void> {
     .map((message) => message.runId)
     .filter((runId): runId is string => Boolean(runId))
   await Promise.all(runIds.map((runId) => pollRun(runId)))
-  if (runIds.length > 0) ElMessage.success('运行状态已刷新')
+  if (runIds.length > 0) notice.success('运行状态已刷新')
 }
 
 async function sendTask(): Promise<void> {
@@ -435,27 +461,42 @@ async function sendTask(): Promise<void> {
   if (!goal || sending.value) return
   if (backendState.value === 'setup') {
     openSettings('models')
-    ElMessage.warning('请先配置一个可用的模型服务，再发送任务')
+    notice.warning('请先配置一个可用的模型服务，再发送任务')
     return
   }
   if (backendState.value !== 'online') {
-    ElMessage.warning('请先连接服务，再发送任务')
+    notice.warning('请先连接服务，再发送任务')
     return
   }
   let execution: ReturnType<typeof executionInput>
   try {
     execution = executionInput(runMode.value, acceptanceTemplate.value, workflow.value)
   } catch (error) {
-    ElMessage.warning(error instanceof Error ? error.message : '请选择任务完成条件')
+    notice.warning(error instanceof Error ? error.message : '请选择任务完成条件')
+    return
+  }
+  const selectedModel = modelSelection.value
+  if (
+    selectedModel &&
+    !modelChoices.value.some(
+      (item) => item.provider === selectedModel.provider && item.model === selectedModel.model,
+    )
+  ) {
+    notice.warning('所选模型不可用，请在设置页重新测试，或选择跟随项目设置')
     return
   }
   const conversationId = activeConversation.value.id
   const selectedTaskType = activeConversation.value.taskType
   const selectedRiskLevel = activeConversation.value.riskLevel
-  const selectedSkills = activeConversation.value.skillSelections.map((item) => ({ ...item }))
+  const selectedSkills = activeConversation.value.skillSelections.map(({ skill_id }) => ({
+    skill_id,
+    provider: null,
+  }))
   const selectedFunctionsByAgent = Object.fromEntries(
-    Object.entries(activeConversation.value.functionsByAgent)
-      .map(([agentId, functions]) => [agentId, functions ? [...functions] : []]),
+    Object.entries(activeConversation.value.functionsByAgent).map(([agentId, functions]) => [
+      agentId,
+      functions ? [...functions] : [],
+    ]),
   )
   const selectedCrossReview = activeConversation.value.crossReview
   const mentionedAgents = agents.value.filter(
@@ -470,13 +511,14 @@ async function sendTask(): Promise<void> {
       ? mentionedAgents.map((agent) => agent.id)
       : activeConversation.value.selectedAgentIds
   if (effectiveMode !== 'auto' && effectiveAssignees.length === 0) {
-    ElMessage.warning('直接或按功能分配至少需要选择一名协作成员')
+    notice.warning('直接或按功能分配至少需要选择一名协作成员')
     return
   }
-  if (execution.engine === 'blackboard' && effectiveAssignees.some(
-    (agentId) => (selectedFunctionsByAgent[agentId]?.length ?? 0) > 1,
-  )) {
-    ElMessage.warning('黑板协作中每位成员请选择一项功能，再发送任务')
+  if (
+    execution.engine === 'blackboard' &&
+    effectiveAssignees.some((agentId) => (selectedFunctionsByAgent[agentId]?.length ?? 0) > 1)
+  ) {
+    notice.warning('黑板协作中每位成员请选择一项功能，再发送任务')
     return
   }
   addMessage(conversationId, 'user', goal)
@@ -488,6 +530,7 @@ async function sendTask(): Promise<void> {
   try {
     const accepted = await harnessApi.createRun({
       ...execution,
+      ...(selectedModel ? { model_selection: { ...selectedModel } } : {}),
       goal,
       task_type: selectedTaskType,
       risk_level: selectedRiskLevel,
@@ -543,7 +586,7 @@ async function resumeRun(runId: string, approved: boolean, note: string): Promis
     )
     streamRun(runId)
   } catch (error) {
-    ElMessage.error(error instanceof Error ? error.message : '审批操作失败')
+    notice.error(error instanceof Error ? error.message : '审批操作失败')
   } finally {
     actionBusyRunId.value = null
   }
@@ -557,9 +600,9 @@ async function cancelRun(runId: string): Promise<void> {
     stopPolling(runId)
     setRunStatus(runId, 'cancelled', '任务已取消。')
     if (runResults[runId]) runResults[runId].status = 'cancelled'
-    ElMessage.success('运行已停止')
+    notice.success('运行已停止')
   } catch (error) {
-    ElMessage.error(error instanceof Error ? error.message : '停止运行失败')
+    notice.error(error instanceof Error ? error.message : '停止运行失败')
   } finally {
     actionBusyRunId.value = null
   }
@@ -571,6 +614,7 @@ function cancelCurrentRun(): void {
 
 async function openRunDetails(runId: string): Promise<void> {
   historyOpen.value = false
+  historyOpen.value = false
   detailRequest?.abort()
   const request = new AbortController()
   detailRequest = request
@@ -580,12 +624,9 @@ async function openRunDetails(runId: string): Promise<void> {
     const run = await harnessApi.getRun(runId, request.signal)
     if (!request.signal.aborted) await applyRun(run)
   } catch (error) {
-    if (!request.signal.aborted) ElMessage.error(error instanceof Error ? error.message : '运行详情读取失败')
+    if (!request.signal.aborted)
+      notice.error(error instanceof Error ? error.message : '运行详情读取失败')
   }
-}
-
-function useSuggestion(value: string): void {
-  prompt.value = value
 }
 
 function insertMention(agent: AgentDescriptor): void {
@@ -643,6 +684,8 @@ onBeforeUnmount(() => {
     :initial-section="settingsSection"
     :dark="dark"
     :connection-label="connectionLabel"
+    :connection-state="backendState"
+    @history="openHistory"
     @back="openChat"
     @changed="checkConnection"
     @toggle-theme="toggleTheme"
@@ -655,82 +698,34 @@ onBeforeUnmount(() => {
     :title="activeConversation.title"
     :connection-label="connectionLabel"
     :connection-state="backendState"
-    :members="groupAgents"
-    :blackboard-mode="blackboardMode"
+    :dark="dark"
+    @history="openHistory"
+    @refresh="refreshActiveConversation"
+    @authenticate="openAuthDialog"
+    @toggle-theme="toggleTheme"
+    @settings="openSettings('models')"
+    @create="showNewConversation"
+    :empty="activeConversation.messages.length === 0"
   >
     <template #sidebar>
       <ChatSidebar
         :conversations="conversations"
         :active-id="activeId"
-        :dark="dark"
         @create="showNewConversation"
         @select="chooseConversation"
         @delete="deleteConversation"
-        @settings="openSettings('models')"
-        @toggle-theme="toggleTheme"
+        @pin="togglePinConversation"
+        @rename="renameConversation"
+        @history="openHistory"
       />
     </template>
-
-    <template #mobile-sidebar>
-      <ChatSidebar
-        mobile
-        :conversations="conversations"
-        :active-id="activeId"
-        :dark="dark"
-        @create="showNewConversation"
-        @select="chooseConversation"
-        @delete="deleteConversation"
-        @settings="openSettings('models')"
-        @toggle-theme="toggleTheme"
-      />
-    </template>
-
-    <template #header-actions>
-      <el-button @click="historyOpen = true">运行记录</el-button>
-      <el-tag round effect="plain">{{ taskTypeLabel(activeConversation.taskType) }}</el-tag>
-      <el-button
-        circle
-        :icon="Refresh"
-        class="refresh-run-status"
-        aria-label="刷新运行状态"
-        @click="refreshActiveConversation"
-      />
-      <el-button
-        circle
-        :icon="Setting"
-        aria-label="打开设置"
-        @click="openSettings('models')"
-      />
-      <el-button
-        v-if="backendState === 'auth' || apiKeyConfigured"
-        circle
-        :icon="Lock"
-        aria-label="部署 API 身份验证"
-        @click="openAuthDialog"
-      />
-    </template>
-
     <template #conversation>
-      <section ref="conversationPane" class="conversation">
-        <div v-if="activeConversation.messages.length === 0" class="welcome-card">
-          <div class="welcome-mark"><EditPen /></div>
-          <p class="eyebrow"><Connection /> AI 协作群</p>
-          <h2>有什么事，发群里聊聊</h2>
-          <p>
-            直接说你想做什么就行。任务管家会帮你拆分、找人处理，做完后大家还会互相检查。
-          </p>
-          <div class="suggestions">
-            <button type="button" @click="useSuggestion('帮我安排一份能直接照着做的项目启动计划')">
-              帮我安排项目启动步骤
-            </button>
-            <button type="button" @click="useSuggestion('帮我比较这两个方案，说说你更推荐哪一个')">
-              帮我选一个更合适的方案
-            </button>
-            <button type="button" @click="useSuggestion('帮我看看这份材料里有哪些容易踩坑的地方')">
-              帮我看看哪里容易踩坑
-            </button>
-          </div>
-        </div>
+      <section
+        ref="conversationPane"
+        class="conversation"
+        :aria-label="activeConversation.messages.length ? '任务消息' : '开始新任务'"
+      >
+        <WelcomeHero v-if="activeConversation.messages.length === 0" />
         <div v-else class="message-list">
           <MessageBubble
             v-for="message in activeConversation.messages"
@@ -747,8 +742,40 @@ onBeforeUnmount(() => {
         </div>
       </section>
     </template>
-
     <template #composer>
+      <div
+        v-if="backendState === 'setup' || backendState === 'offline' || backendState === 'auth'"
+        class="connection-notice"
+        role="status"
+      >
+        <UIcon name="i-lucide-circle-alert" />
+        <span>{{
+          backendState === 'setup'
+            ? '前往设置连接模型上游，选择协议和工作模型后开始任务。'
+            : backendState === 'auth'
+              ? '此工作空间需要身份验证。'
+              : '暂时无法连接服务。你的输入会保留。'
+        }}</span>
+        <UButton
+          size="xs"
+          color="neutral"
+          variant="link"
+          @click="
+            backendState === 'setup'
+              ? openSettings('models')
+              : backendState === 'auth'
+                ? openAuthDialog()
+                : checkConnection()
+          "
+          >{{
+            backendState === 'setup'
+              ? '配置模型'
+              : backendState === 'auth'
+                ? '验证身份'
+                : '重新连接'
+          }}</UButton
+        >
+      </div>
       <ComposerBox
         v-model="prompt"
         v-model:task-type="taskType"
@@ -769,46 +796,72 @@ onBeforeUnmount(() => {
         @cancel="cancelCurrentRun"
         @mention="insertMention"
       >
-        <template #execution>
-          <RunModeOptions
+        <template #model>
+          <ComposerModelSelect
+            v-model="modelSelection"
+            :choices="modelChoices"
+            :disabled="sending || Boolean(activeRunMessage)"
+            @settings="openSettings('models')"
+          />
+        </template>
+        <template #options
+          ><RunModeOptions
             v-model="runMode"
             v-model:template-id="acceptanceTemplate"
             :workflow="workflow"
             :disabled="sending"
-          />
-        </template>
+            section="mode"
+        /></template>
+        <template #execution
+          ><RunModeOptions
+            v-model="runMode"
+            v-model:template-id="acceptanceTemplate"
+            :workflow="workflow"
+            :disabled="sending"
+            section="completion"
+        /></template>
       </ComposerBox>
     </template>
-
-    <template #overlay>
-      <RunHistoryDrawer v-model="historyOpen" @select="openRunDetails" />
-      <RunDetailsDrawer v-model="detailsOpen" :run="selectedRun" :agents="agents" @update="applyRun" />
-    </template>
   </GroupChatLayout>
-
-  <el-dialog
-    v-model="authDialogOpen"
-    title="部署 API 身份验证"
-    width="min(430px, calc(100vw - 32px))"
-    :close-on-click-modal="backendState !== 'auth'"
+  <RunHistoryDrawer v-model="historyOpen" @select="openRunDetails" />
+  <RunDetailsDrawer
+    v-if="detailsOpen"
+    v-model="detailsOpen"
+    :run="selectedRun"
+    :agents="agents"
+    @update="applyRun"
+  />
+  <UModal
+    v-model:open="authDialogOpen"
+    title="工作台访问验证"
+    description="访问当前 Work Harness 工作台"
+    :dismissible="backendState !== 'auth'"
   >
-    <p class="auth-dialog-copy">
-      输入部署环境的 WORK_HARNESS_API_KEY。密钥只保存在当前浏览器标签页的
-      sessionStorage，不会写入模型服务配置。
-    </p>
-    <el-input
-      v-model="apiKeyInput"
-      type="password"
-      show-password
-      autocomplete="current-password"
-      placeholder="部署 API Key"
-      @keyup.enter="submitApiKey"
-    />
-    <template #footer>
-      <el-button v-if="apiKeyConfigured" @click="clearApiKey">清除密钥</el-button>
-      <el-button type="primary" :loading="authenticating" @click="submitApiKey">
-        验证并连接
-      </el-button>
+    <template #body>
+      <p class="auth-dialog-copy">
+        此密钥用于访问工作台，仅保存在当前标签页。模型服务的 Base URL 与 API Key 请在「设置 →
+        模型连接」中配置。
+      </p>
+      <div class="auth-dialog-fields">
+        <UFormField label="工作台地址（Base URL）">
+          <UInput :model-value="harnessApi.baseUrl()" readonly class="w-full" />
+        </UFormField>
+        <UFormField label="工作台访问密钥">
+          <UInput
+            v-model="apiKeyInput"
+            type="password"
+            autocomplete="current-password"
+            class="w-full"
+            placeholder="输入工作台访问密钥"
+            @keyup.enter="submitApiKey"
+          />
+        </UFormField>
+      </div>
     </template>
-  </el-dialog>
+    <template #footer
+      ><UButton v-if="apiKeyConfigured" color="neutral" variant="outline" @click="clearApiKey"
+        >清除密钥</UButton
+      ><UButton :loading="authenticating" @click="submitApiKey">验证并连接</UButton></template
+    >
+  </UModal>
 </template>

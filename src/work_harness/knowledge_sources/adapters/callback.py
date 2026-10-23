@@ -7,7 +7,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from langgraph.graph import END, START, StateGraph
-from pydantic import JsonValue
+from pydantic import ConfigDict, JsonValue
 
 from work_harness.blackboard.activation import match_rule
 from work_harness.blackboard.models import BoardModel, FactContent, FactProposal
@@ -64,6 +64,9 @@ class RuleKnowledgeSource:
 
 
 class VerifiedObservation(BoardModel):
+    # Evidence can contain exact file bytes; BoardModel's text normalization would corrupt them.
+    model_config = ConfigDict(str_strip_whitespace=False)
+
     local_id: str
     content: FactContent
     verifier_id: str

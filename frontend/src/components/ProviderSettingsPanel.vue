@@ -1,12 +1,14 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
-import { CircleCheck, Delete, EditPen, Plus, Refresh } from '@element-plus/icons-vue'
-import { ElMessage } from 'element-plus'
+import ConfirmAction from './ConfirmAction.vue'
+import ModelCatalog from './ModelCatalog.vue'
+import { computed, onMounted, onBeforeUnmount, reactive, ref, watch } from 'vue'
+import { useNotice } from '../composables/useNotice'
 
 import { harnessApi } from '../services/api'
 import { logicalModelLabel } from '../utils/labels'
 import type {
   AgentDescriptor,
+  UpstreamModel,
   ProviderApiFamily,
   ProviderCredentialSource,
   ProviderDescriptor,
@@ -14,12 +16,16 @@ import type {
   ProviderProtocolVariant,
 } from '../types'
 
+import ModelReasoningSettings from './ModelReasoningSettings.vue'
+import type { ModelSettings } from '../types'
+
 type StructuredOutputMode = '' | 'json_schema' | 'json_object'
 type ChatTokenParameter = '' | 'max_completion_tokens' | 'max_tokens'
 
 interface ProviderFormState {
   name: string
   protocolVariant: ProviderProtocolVariant
+  authScheme: 'auto' | 'bearer' | 'x_api_key'
   apiFamily: ProviderApiFamily
   enabled: boolean
   baseUrl: string
@@ -35,37 +41,54 @@ interface ProviderFormState {
   storeResponses: boolean
   timeoutSeconds: number
   maxConcurrency: number
-  allowInsecureHttp: boolean
-  allowPrivateNetwork: boolean
   options: Record<string, unknown>
   defaultModel: string
+  modelSettings: Record<string, ModelSettings>
   modelBindings: Record<string, string>
   agentBindings: Record<string, string>
 }
 
-const props = withDefaults(defineProps<{
-  logicalModels: string[]
-  agents: AgentDescriptor[]
-  setupMode?: boolean
-}>(), {
-  setupMode: false,
-})
+const notice = useNotice()
+
+const props = withDefaults(
+  defineProps<{
+    logicalModels: string[]
+    agents: AgentDescriptor[]
+    setupMode?: boolean
+  }>(),
+  {
+    setupMode: false,
+  },
+)
 
 const emit = defineEmits<{ changed: [] }>()
 const providers = ref<ProviderDescriptor[]>([])
 const loading = ref(false)
+const loadFailed = ref(false)
 const saving = ref(false)
 const editing = ref(false)
 const editingExisting = ref(false)
 const restartRequired = ref(false)
 const setupAutoOpened = ref(false)
+const upstreamModels = ref<UpstreamModel[]>([])
+const discovering = ref(false)
+const discoveryError = ref('')
+const discoveryFetched = ref(false)
+const discoveryTruncated = ref(false)
+let discoveryController: AbortController | undefined
 
 const form = reactive<ProviderFormState>(emptyForm())
 const configurableProviders = computed(() =>
-  providers.value.filter((provider) => provider.config.adapter === 'openai_compatible'),
+  providers.value.filter((provider) =>
+    ['openai_compatible', 'anthropic'].includes(provider.config.adapter),
+  ),
 )
 const bindTargets = computed(() => [
-  { id: 'main', displayName: '任务管家和检查组', description: '负责读懂需求、安排分工、检查结果和整理回复' },
+  {
+    id: 'main',
+    displayName: '协调与核验 Agent',
+    description: '负责读懂需求、安排分工、检查结果和整理回复',
+  },
   ...props.agents
     .filter((agent) => agent.assignable)
     .map((agent) => ({
@@ -74,15 +97,16 @@ const bindTargets = computed(() => [
       description: '可以单独选择自己的模型',
     })),
 ])
-const availableModels = computed(() =>
-  [...new Set(form.allowedModels.map((item) => item.trim()).filter(Boolean))],
-)
+const availableModels = computed(() => [
+  ...new Set(form.allowedModels.map((item) => item.trim()).filter(Boolean)),
+])
 
 function emptyForm(): ProviderFormState {
   return {
     name: '',
     protocolVariant: 'openai',
     apiFamily: 'chat_completions',
+    authScheme: 'auto',
     enabled: false,
     baseUrl: '',
     baseUrlEnv: '',
@@ -97,17 +121,20 @@ function emptyForm(): ProviderFormState {
     storeResponses: false,
     timeoutSeconds: 60,
     maxConcurrency: 8,
-    allowInsecureHttp: false,
-    allowPrivateNetwork: false,
     options: {},
     defaultModel: '',
+    modelSettings: {},
     modelBindings: {},
     agentBindings: {},
   }
 }
 
+let replacingForm = false
 function replaceForm(value: ProviderFormState): void {
+  resetDiscovery()
+  replacingForm = true
   Object.assign(form, value)
+  replacingForm = false
 }
 
 function startCreate(): void {
@@ -119,22 +146,24 @@ function startCreate(): void {
 function startEdit(provider: ProviderDescriptor): void {
   const config = provider.config
   const bindingValues = props.logicalModels.map((logical) => provider.model_bindings[logical])
-  const sharedDefault = bindingValues.length > 0
-    && bindingValues.every((model) => model && model === bindingValues[0])
-    ? (bindingValues[0] ?? '')
-    : ''
-  const usePageCredential = props.setupMode
-    && provider.source === 'yaml'
-    && provider.endpoint_available === false
-    && provider.credential_available === false
+  const sharedDefault =
+    bindingValues.length > 0 && bindingValues.every((model) => model && model === bindingValues[0])
+      ? (bindingValues[0] ?? '')
+      : ''
+  const usePageCredential =
+    props.setupMode &&
+    provider.source === 'yaml' &&
+    provider.endpoint_available === false &&
+    provider.credential_available === false
   replaceForm({
     name: provider.name,
     protocolVariant: config.protocol_variant,
     apiFamily: config.api_family,
+    authScheme: config.auth_scheme ?? 'auto',
     enabled: config.enabled,
     baseUrl: config.base_url ?? '',
     baseUrlEnv: config.base_url_env ?? '',
-    credentialSource: usePageCredential ? 'stored' : config.credential_source ?? 'environment',
+    credentialSource: usePageCredential ? 'stored' : (config.credential_source ?? 'environment'),
     apiKeyEnv: config.api_key_env ?? '',
     apiKey: '',
     credentialConfigured:
@@ -146,10 +175,9 @@ function startEdit(provider: ProviderDescriptor): void {
     storeResponses: config.store_responses,
     timeoutSeconds: config.timeout_seconds,
     maxConcurrency: config.max_concurrency,
-    allowInsecureHttp: config.allow_insecure_http,
-    allowPrivateNetwork: config.allow_private_network,
     options: { ...config.options },
     defaultModel: sharedDefault,
+    modelSettings: JSON.parse(JSON.stringify(config.model_settings ?? {})),
     modelBindings: { ...provider.model_bindings },
     agentBindings: { ...provider.agent_bindings },
   })
@@ -158,6 +186,8 @@ function startEdit(provider: ProviderDescriptor): void {
 }
 
 function cancelEdit(): void {
+  resetDiscovery()
+  form.apiKey = ''
   editing.value = false
   editingExisting.value = false
 }
@@ -178,15 +208,14 @@ function applyDefaultModel(model: string): void {
 
 function syncAllowedModels(values: string[]): void {
   let normalized = [...new Set(values.map((item) => item.trim()).filter(Boolean))]
-  if (
-    props.setupMode
-    && normalized.length > 1
-    && normalized.includes('configured-model')
-  ) {
+  if (props.setupMode && normalized.length > 1 && normalized.includes('configured-model')) {
     normalized = normalized.filter((model) => model !== 'configured-model')
   }
   form.allowedModels = normalized
   const allowed = new Set(normalized)
+  form.modelSettings = Object.fromEntries(
+    Object.entries(form.modelSettings).filter(([model]) => allowed.has(model)),
+  )
   if (!allowed.has(form.defaultModel)) {
     form.defaultModel = normalized.length === 1 ? (normalized[0] ?? '') : ''
   }
@@ -208,24 +237,20 @@ function validateForm(): string | null {
     return '请把示例模型名称替换为服务实际支持的模型名称'
   }
   if (
-    form.enabled
-    && !form.baseUrl.trim()
-    && (form.credentialSource !== 'environment' || !form.baseUrlEnv.trim())
+    form.enabled &&
+    !form.baseUrl.trim() &&
+    (form.credentialSource !== 'environment' || !form.baseUrlEnv.trim())
   ) {
     return '启用模型服务前，需要配置 Base URL 或对应的环境变量名'
   }
-  if (
-    form.enabled
-    && form.credentialSource === 'environment'
-    && !form.apiKeyEnv.trim()
-  ) {
+  if (form.enabled && form.credentialSource === 'environment' && !form.apiKeyEnv.trim()) {
     return '使用环境变量时，需要填写 API Key 环境变量名'
   }
   if (
-    form.enabled
-    && form.credentialSource === 'stored'
-    && !form.apiKey.trim()
-    && (!form.credentialConfigured || form.clearApiKey)
+    form.enabled &&
+    form.credentialSource === 'stored' &&
+    !form.apiKey.trim() &&
+    (!form.credentialConfigured || form.clearApiKey)
   ) {
     return '使用内置密钥库时，需要填写 API Key'
   }
@@ -234,11 +259,11 @@ function validateForm(): string | null {
     ...Object.values(compactBindings(form.modelBindings)),
     ...Object.values(compactBindings(form.agentBindings)),
   ].filter((model) => !allowed.has(model))
-  if (unavailable.length > 0) return `成员分配中使用了尚未添加的模型：${unavailable.join('、')}`
+  if (unavailable.length > 0) return `Agent 分配中使用了尚未添加的模型：${unavailable.join('、')}`
   if (
-    props.setupMode
-    && form.enabled
-    && props.logicalModels.some((logical) => !form.modelBindings[logical]?.trim())
+    props.setupMode &&
+    form.enabled &&
+    props.logicalModels.some((logical) => !form.modelBindings[logical]?.trim())
   ) {
     return '首次配置需要选择默认工作模型，系统会自动分配给各个工作阶段'
   }
@@ -248,55 +273,60 @@ function validateForm(): string | null {
 function profilePayload(): ProviderProfileSpec {
   return {
     config: {
-      adapter: 'openai_compatible',
-      protocol_variant: form.protocolVariant,
+      adapter: form.apiFamily === 'messages' ? 'anthropic' : 'openai_compatible',
+      auth_scheme: form.authScheme,
+      protocol_variant: form.apiFamily === 'chat_completions' ? form.protocolVariant : 'openai',
       api_family: form.apiFamily,
       structured_output_mode: form.structuredOutputMode || null,
-      chat_token_parameter: form.chatTokenParameter || null,
-      store_responses: form.storeResponses,
+      chat_token_parameter:
+        form.apiFamily === 'chat_completions' ? form.chatTokenParameter || null : null,
+      store_responses: form.apiFamily === 'responses' && form.storeResponses,
       enabled: form.enabled,
       base_url: form.baseUrl.trim() || null,
-      base_url_env:
-        form.credentialSource === 'environment' ? form.baseUrlEnv.trim() || null : null,
+      base_url_env: form.credentialSource === 'environment' ? form.baseUrlEnv.trim() || null : null,
       credential_source: form.credentialSource,
-      api_key_env:
-        form.credentialSource === 'environment' ? form.apiKeyEnv.trim() || null : null,
+      api_key_env: form.credentialSource === 'environment' ? form.apiKeyEnv.trim() || null : null,
       allowed_models: availableModels.value,
+      model_settings: form.modelSettings,
       capabilities: ['chat', 'structured_output', 'tool_calling'],
       timeout_seconds: form.timeoutSeconds,
       max_concurrency: form.maxConcurrency,
-      allow_insecure_http: form.allowInsecureHttp,
-      allow_private_network: form.allowPrivateNetwork,
+      allow_insecure_http: null,
+      allow_private_network: null,
       options: { ...form.options },
     },
     model_bindings: compactBindings(form.modelBindings),
     agent_bindings: compactBindings(form.agentBindings),
-    api_key:
-      form.credentialSource === 'stored' ? form.apiKey.trim() || undefined : undefined,
+    api_key: form.credentialSource === 'stored' ? form.apiKey.trim() || undefined : undefined,
     clear_api_key: form.clearApiKey || form.credentialSource === 'environment',
   }
 }
 
 async function loadProviders(): Promise<void> {
   loading.value = true
+  loadFailed.value = false
   try {
     const response = await harnessApi.providers()
     providers.value = response.items
     restartRequired.value = response.restart_required
     if (props.setupMode && !setupAutoOpened.value && !editing.value) {
-      const initialProvider = response.items.find(
-        (provider) => provider.name === 'compatible'
-          && provider.config.adapter === 'openai_compatible',
-      ) ?? response.items.find(
-        (provider) => provider.config.adapter === 'openai_compatible',
-      )
+      const initialProvider =
+        response.items.find(
+          (provider) =>
+            provider.name === 'compatible' &&
+            ['openai_compatible', 'anthropic'].includes(provider.config.adapter),
+        ) ??
+        response.items.find((provider) =>
+          ['openai_compatible', 'anthropic'].includes(provider.config.adapter),
+        )
       if (initialProvider) {
         setupAutoOpened.value = true
         startEdit(initialProvider)
       }
     }
   } catch (error) {
-    ElMessage.error(error instanceof Error ? error.message : '无法读取模型服务配置')
+    loadFailed.value = true
+    notice.error(error instanceof Error ? error.message : '无法读取模型服务配置')
   } finally {
     loading.value = false
   }
@@ -305,7 +335,7 @@ async function loadProviders(): Promise<void> {
 async function saveProvider(): Promise<void> {
   const issue = validateForm()
   if (issue) {
-    ElMessage.warning(issue)
+    notice.warning(issue)
     return
   }
   saving.value = true
@@ -313,11 +343,11 @@ async function saveProvider(): Promise<void> {
     const result = await harnessApi.saveProvider(form.name, profilePayload())
     restartRequired.value = result.restart_required
     await loadProviders()
-    editing.value = false
+    cancelEdit()
     emit('changed')
-    ElMessage.success('设置已保存，请重启 Work Harness 使新配置生效')
+    notice.success('设置已保存，请重启 Work Harness 使新配置生效')
   } catch (error) {
-    ElMessage.error(error instanceof Error ? error.message : '模型服务保存失败')
+    notice.error(error instanceof Error ? error.message : '模型服务保存失败')
   } finally {
     saving.value = false
   }
@@ -328,13 +358,13 @@ async function deleteProvider(provider: ProviderDescriptor): Promise<void> {
     await harnessApi.deleteProvider(provider.name)
     await loadProviders()
     emit('changed')
-    ElMessage.success(
+    notice.success(
       provider.name === 'compatible'
         ? '默认模型服务已恢复为内置初始设置，请重启后生效'
         : `模型服务 ${providerDisplayName(provider)} 已删除，请重启后生效`,
     )
   } catch (error) {
-    ElMessage.error(error instanceof Error ? error.message : '模型服务删除失败')
+    notice.error(error instanceof Error ? error.message : '模型服务删除失败')
   }
 }
 
@@ -347,13 +377,13 @@ function statusLabel(provider: ProviderDescriptor): string {
   return '已就绪'
 }
 
-function statusType(provider: ProviderDescriptor): 'success' | 'warning' | 'info' | 'danger' {
+function statusType(provider: ProviderDescriptor): 'success' | 'warning' | 'info' | 'error' {
   if (!provider.config.enabled) return 'info'
   if (!provider.loaded) return 'warning'
   if (provider.endpoint_available === false || provider.credential_available === false) {
-    return 'danger'
+    return 'error'
   }
-  if (provider.config.allowed_models.includes('configured-model')) return 'danger'
+  if (provider.config.allowed_models.includes('configured-model')) return 'error'
   return 'success'
 }
 
@@ -368,15 +398,17 @@ function providerSourceLabel(provider: ProviderDescriptor): string {
 }
 
 function protocolLabel(provider: ProviderDescriptor): string {
-  return provider.config.protocol_variant === 'deepseek'
-    ? 'DeepSeek 兼容格式'
-    : 'OpenAI 兼容格式'
+  return provider.config.adapter === 'anthropic'
+    ? 'Anthropic 兼容'
+    : provider.config.protocol_variant === 'deepseek'
+      ? 'DeepSeek 兼容'
+      : 'OpenAI 兼容'
 }
 
 function apiFamilyLabel(provider: ProviderDescriptor): string {
-  return provider.config.api_family === 'responses'
-    ? 'Responses 请求格式'
-    : '对话补全请求格式'
+  return (
+    protocolOptions.find((item) => item.value === provider.config.api_family)?.label ?? '自定义协议'
+  )
 }
 
 function endpointLabel(provider: ProviderDescriptor): string {
@@ -393,8 +425,8 @@ function credentialLabel(provider: ProviderDescriptor): string {
 }
 
 function agentBindingLabel(agentId: string): string {
-  if (agentId === 'main') return '任务管家和检查组'
-  return props.agents.find((agent) => agent.id === agentId)?.display_name ?? '指定群成员'
+  if (agentId === 'main') return '协调与核验 Agent'
+  return props.agents.find((agent) => agent.id === agentId)?.display_name ?? '指定 Agent'
 }
 
 function deleteActionLabel(provider: ProviderDescriptor): string {
@@ -407,6 +439,131 @@ function deleteConfirmTitle(provider: ProviderDescriptor): string {
     : `删除模型服务 ${providerDisplayName(provider)}？`
 }
 
+const protocolOptions = [
+  {
+    value: 'responses',
+    label: 'OpenAI Responses',
+    path: 'responses',
+    description: '使用 Responses 接口的 OpenAI 服务及兼容网关。',
+  },
+  {
+    value: 'chat_completions',
+    label: 'OpenAI Chat Completions',
+    path: 'chat/completions',
+    description: '适用于常见的 OpenAI 兼容服务，也可切换 DeepSeek 参数。',
+  },
+  {
+    value: 'messages',
+    label: 'Claude Messages',
+    path: 'messages',
+    description: '使用 Anthropic 原生消息与工具格式，支持 Claude 兼容渠道。',
+  },
+] as const
+const activeProtocol = computed(() =>
+  protocolOptions.find((item) => item.value === form.apiFamily)!,
+)
+function resetDiscovery(): void {
+  discoveryController?.abort()
+  discovering.value = false
+  upstreamModels.value = []
+  discoveryError.value = ''
+  discoveryFetched.value = false
+  discoveryTruncated.value = false
+}
+
+watch(
+  () => [
+    form.name,
+    form.baseUrl,
+    form.baseUrlEnv,
+    form.apiFamily,
+    form.authScheme,
+    form.credentialSource,
+    form.apiKey,
+    form.apiKeyEnv,
+    form.clearApiKey,
+  ],
+  resetDiscovery,
+)
+const verifyingModel = ref(false)
+const verificationConnection = computed(() => {
+  const profile = profilePayload()
+  return {
+    config: { ...profile.config, model_settings: {} },
+    provider_name: editingExisting.value ? form.name : undefined,
+    api_key: profile.api_key,
+    clear_api_key: profile.clear_api_key,
+  }
+})
+watch(
+  () => [
+    form.name,
+    form.baseUrl,
+    form.baseUrlEnv,
+    form.apiFamily,
+    form.authScheme,
+    form.credentialSource,
+    form.apiKey,
+    form.apiKeyEnv,
+    form.clearApiKey,
+    form.protocolVariant,
+    form.structuredOutputMode,
+    form.chatTokenParameter,
+    form.storeResponses,
+  ],
+  () => {
+    if (!replacingForm) form.modelSettings = {}
+  },
+  { flush: 'sync' },
+)
+watch(
+  () => form.baseUrl,
+  (value) => {
+    if (form.credentialSource === 'environment' && form.baseUrlEnv.trim()) return
+    // A complete endpoint identifies its wire format. Root URLs keep the selected protocol.
+    const path = value.trim().split(/[?#]/, 1)[0]?.replace(/\/+$/, '') ?? ''
+    const protocol = protocolOptions.find((item) => path.endsWith(`/${item.path}`))
+    if (protocol) form.apiFamily = protocol.value
+  },
+)
+onBeforeUnmount(() => discoveryController?.abort())
+
+async function fetchModels(): Promise<void> {
+  resetDiscovery()
+  const controller = new AbortController()
+  discoveryController = controller
+  discovering.value = true
+  const profile = profilePayload()
+  try {
+    const result = await harnessApi.discoverModels(
+      {
+        config: { ...profile.config, enabled: false },
+        provider_name: editingExisting.value ? form.name : undefined,
+        api_key: profile.api_key,
+        clear_api_key: profile.clear_api_key,
+      },
+      controller.signal,
+    )
+    if (controller.signal.aborted) return
+    upstreamModels.value = result.items
+    discoveryTruncated.value = result.truncated
+    discoveryFetched.value = true
+  } catch (error) {
+    if (!controller.signal.aborted)
+      discoveryError.value = error instanceof Error ? error.message : '模型获取失败'
+  } finally {
+    if (!controller.signal.aborted) discovering.value = false
+  }
+}
+
+function toggleUpstreamModel(model: string): void {
+  syncAllowedModels(
+    form.allowedModels.includes(model)
+      ? form.allowedModels.filter((item) => item !== model)
+      : [...form.allowedModels, model],
+  )
+}
+
 onMounted(() => {
   setupAutoOpened.value = false
   void loadProviders()
@@ -417,38 +574,26 @@ onMounted(() => {
   <section class="provider-settings-panel">
     <header class="settings-content-heading">
       <div>
-        <p class="eyebrow">模型与路由</p>
-        <h2>{{ setupMode ? '完成首次模型配置' : '模型服务与成员分配' }}</h2>
-        <p>适用于 OpenAI 兼容服务和 DeepSeek 兼容服务。</p>
+        <h2>{{ setupMode ? '完成首次模型配置' : '模型连接' }}</h2>
+        <p>连接官方 API 或 new-api、sub2api 等网关，获取模型并分配给任务与 Agent。</p>
       </div>
     </header>
 
     <div class="provider-settings">
-      <el-alert
+      <UAlert
         v-if="setupMode"
         title="连接真实模型后才能开始任务"
-        description="填写接口地址、密钥和模型名称，保存后重启服务。未完成配置时，系统不会再用模拟结果代替子成员工作。"
-        type="warning"
-        show-icon
-        :closable="false"
+        description="选择协议，填写上游地址与密钥，再获取并选择模型。保存后重启服务即可开始任务。"
+        color="warning"
+        variant="subtle"
       />
-      <el-alert
+      <UAlert
         v-if="restartRequired"
         title="新设置正在等待重启"
         description="重启 Work Harness 后会装载新设置；已经开始的任务不会中途切换模型。"
-        type="warning"
-        show-icon
-        :closable="false"
+        color="warning"
+        variant="subtle"
       />
-      <el-alert
-        v-if="!setupMode"
-        title="密钥可以用两种方式提供"
-        description="既可以在本页面加密保存，也可以只填写变量名称，由 Docker 或部署平台注入。页面和 API 都不会回显密钥明文。"
-        type="info"
-        show-icon
-        :closable="false"
-      />
-
       <template v-if="!editing">
         <div class="provider-toolbar">
           <div>
@@ -456,13 +601,20 @@ onMounted(() => {
             <small>可以修改内置初始配置，也可以添加多个自定义模型服务。</small>
           </div>
           <span>
-            <el-button :icon="Refresh" circle aria-label="刷新模型服务" @click="loadProviders" />
-            <el-button type="primary" :icon="Plus" @click="startCreate">添加服务</el-button>
+            <UButton
+              icon="i-lucide-refresh-cw"
+              v-if="loadFailed"
+              aria-label="重新读取模型服务"
+              @click="loadProviders"
+              color="neutral"
+              variant="outline"
+            />
+            <UButton color="neutral" icon="i-lucide-plus" @click="startCreate">添加服务</UButton>
           </span>
         </div>
 
-        <el-skeleton v-if="loading" :rows="5" animated />
-        <el-empty v-else-if="configurableProviders.length === 0" description="还没有模型服务" />
+        <USkeleton v-if="loading" />
+        <UEmpty v-else-if="configurableProviders.length === 0" title="还没有模型服务" />
         <div v-else class="provider-list">
           <article
             v-for="provider in configurableProviders"
@@ -473,16 +625,22 @@ onMounted(() => {
               <div>
                 <span class="provider-name-row">
                   <strong>{{ providerDisplayName(provider) }}</strong>
-                  <el-tag size="small" effect="plain">{{ providerSourceLabel(provider) }}</el-tag>
-                  <el-tag size="small" effect="plain" :type="statusType(provider)">
+                  <UBadge size="sm" variant="subtle">{{ providerSourceLabel(provider) }}</UBadge>
+                  <UBadge size="sm" :color="statusType(provider)" variant="subtle">
                     {{ statusLabel(provider) }}
-                  </el-tag>
+                  </UBadge>
                 </span>
                 <small>{{ protocolLabel(provider) }} · {{ apiFamilyLabel(provider) }}</small>
               </div>
               <span class="provider-card-actions">
-                <el-button text :icon="EditPen" @click="startEdit(provider)">编辑设置</el-button>
-                <el-popconfirm
+                <UButton
+                  variant="ghost"
+                  icon="i-lucide-pencil"
+                  @click="startEdit(provider)"
+                  color="neutral"
+                  >编辑设置</UButton
+                >
+                <ConfirmAction
                   v-if="provider.source === 'persistent'"
                   :title="deleteConfirmTitle(provider)"
                   :confirm-button-text="provider.name === 'compatible' ? '恢复' : '删除'"
@@ -491,178 +649,217 @@ onMounted(() => {
                   @confirm="deleteProvider(provider)"
                 >
                   <template #reference>
-                    <el-button text type="danger" :icon="Delete">
+                    <UButton variant="ghost" color="error" icon="i-lucide-trash-2">
                       {{ deleteActionLabel(provider) }}
-                    </el-button>
+                    </UButton>
                   </template>
-                </el-popconfirm>
+                </ConfirmAction>
               </span>
             </div>
 
             <div class="provider-facts">
-              <span><b>接口地址</b>{{ endpointLabel(provider) }}</span>
+              <span><b>Base URL</b>{{ endpointLabel(provider) }}</span>
               <span><b>密钥方式</b>{{ credentialLabel(provider) }}</span>
-              <span><b>可用模型</b>{{ provider.config.allowed_models.join('、') || '未填写' }}</span>
+              <span
+                ><b>可用模型</b>{{ provider.config.allowed_models.join('、') || '未填写' }}</span
+              >
               <span><b>同时请求数</b>{{ provider.config.max_concurrency }}</span>
             </div>
 
             <div
-              v-if="Object.keys(provider.model_bindings).length || Object.keys(provider.agent_bindings).length"
+              v-if="
+                Object.keys(provider.model_bindings).length ||
+                Object.keys(provider.agent_bindings).length
+              "
               class="provider-routes"
             >
-              <el-tag
+              <UBadge
                 v-for="(model, logical) in provider.model_bindings"
                 :key="`logical:${logical}`"
-                size="small"
-                effect="plain"
+                size="sm"
+                variant="subtle"
               >
                 {{ logicalModelLabel(logical) }} → {{ model }}
-              </el-tag>
-              <el-tag
+              </UBadge>
+              <UBadge
                 v-for="(model, agent) in provider.agent_bindings"
                 :key="`agent:${agent}`"
-                size="small"
-                effect="plain"
-                type="warning"
+                size="sm"
+                color="warning"
+                variant="subtle"
               >
                 {{ agentBindingLabel(agent) }} → {{ model }}
-              </el-tag>
+              </UBadge>
             </div>
           </article>
         </div>
       </template>
 
-      <el-form v-else label-position="top" class="provider-form" @submit.prevent>
+      <form v-else class="provider-form" @submit.prevent>
         <div class="provider-form-heading">
           <div>
             <strong>
-              {{ editingExisting ? `编辑${form.name === 'compatible' ? '默认模型服务' : form.name}` : '添加模型服务' }}
+              {{
+                editingExisting
+                  ? `编辑${form.name === 'compatible' ? '默认模型服务' : form.name}`
+                  : '添加模型服务'
+              }}
             </strong>
-            <small>这里的 OpenAI 表示兼容格式，不限定官方服务，也不限制模型名称。</small>
+            <small>协议决定请求格式；模型名称使用当前 API Key 在上游可访问的模型 ID。</small>
           </div>
-          <el-button text @click="cancelEdit">查看服务列表</el-button>
         </div>
 
         <section class="provider-form-section">
           <h3>连接信息</h3>
           <div class="provider-form-grid">
-            <el-form-item v-if="!editingExisting" label="配置名称（用于区分多个服务）">
-              <el-input v-model="form.name" placeholder="例如 team-gateway" />
-            </el-form-item>
-            <el-form-item label="是否用于任务">
-              <el-switch
-                v-model="form.enabled"
-                inline-prompt
-                active-text="启用"
-                inactive-text="暂存"
+            <UFormField v-if="!editingExisting" label="配置名称（用于区分多个服务）">
+              <UInput v-model="form.name" placeholder="例如 team-gateway" class="w-full" />
+            </UFormField>
+            <UFormField label="是否用于任务">
+              <USwitch v-model="form.enabled" />
+            </UFormField>
+            <label class="native-form-field"
+              ><span>API 协议</span>
+              <select v-model="form.apiFamily" aria-label="API 协议">
+                <option
+                  v-for="protocol in protocolOptions"
+                  :key="protocol.value"
+                  :value="protocol.value"
+                >
+                  {{ protocol.label }}
+                </option>
+              </select>
+              <small>{{ activeProtocol.description }}</small>
+            </label>
+            <UFormField label="接口地址（Base URL）">
+              <UInput
+                v-model="form.baseUrl"
+                placeholder="输入域名、IP 或完整接口地址"
+                class="w-full"
               />
-            </el-form-item>
-            <el-form-item label="接口兼容类型">
-              <el-select v-model="form.protocolVariant">
-                <el-option label="OpenAI 兼容格式" value="openai" />
-                <el-option label="DeepSeek 兼容格式" value="deepseek" />
-              </el-select>
-            </el-form-item>
-            <el-form-item label="请求格式">
-              <el-select v-model="form.apiFamily">
-                <el-option label="对话补全（兼容范围更广）" value="chat_completions" />
-                <el-option label="Responses（服务明确支持时）" value="responses" />
-              </el-select>
-            </el-form-item>
-            <el-form-item label="接口地址（Base URL）">
-              <el-input v-model="form.baseUrl" placeholder="例如 https://gateway.example/v1" />
-            </el-form-item>
-            <el-form-item label="密钥提供方式">
-              <el-select v-model="form.credentialSource">
-                <el-option label="在本页面加密保存" value="stored" />
-                <el-option label="由部署环境提供" value="environment" />
-              </el-select>
-            </el-form-item>
-            <el-form-item
+            </UFormField>
+            <UFormField
               v-if="form.credentialSource === 'stored'"
               :label="form.credentialConfigured ? '模型服务密钥（留空保持不变）' : '模型服务密钥'"
             >
-              <el-input
+              <UInput
                 v-model="form.apiKey"
                 type="password"
-                show-password
                 autocomplete="new-password"
                 placeholder="输入 API Key"
                 @input="form.clearApiKey = false"
+                class="w-full"
               />
-            </el-form-item>
+            </UFormField>
             <template v-else>
-              <el-form-item label="接口地址变量名（可选）">
-                <el-input v-model="form.baseUrlEnv" placeholder="例如 TEAM_MODEL_BASE_URL" />
-              </el-form-item>
-              <el-form-item label="密钥变量名">
-                <el-input v-model="form.apiKeyEnv" placeholder="例如 TEAM_MODEL_API_KEY" />
-              </el-form-item>
+              <UFormField
+                label="接口地址变量名（可选）"
+                description="设置后优先使用此环境变量中的地址。"
+              >
+                <UInput
+                  v-model="form.baseUrlEnv"
+                  placeholder="例如 TEAM_MODEL_BASE_URL"
+                  class="w-full"
+                />
+              </UFormField>
+              <UFormField label="密钥变量名">
+                <UInput
+                  v-model="form.apiKeyEnv"
+                  placeholder="例如 TEAM_MODEL_API_KEY"
+                  class="w-full"
+                />
+              </UFormField>
             </template>
-            <el-form-item
-              v-if="form.credentialSource === 'stored' && form.credentialConfigured"
-              label="已保存的密钥"
-            >
-              <el-checkbox v-model="form.clearApiKey">删除原来的密钥</el-checkbox>
-            </el-form-item>
           </div>
+          <details class="provider-advanced connection-advanced">
+            <summary>高级连接设置</summary>
+            <div class="provider-form-grid provider-advanced-grid">
+              <label v-if="form.apiFamily === 'chat_completions'" class="native-form-field"
+                ><span>Chat 兼容参数</span>
+                <select v-model="form.protocolVariant">
+                  <option value="openai">OpenAI 标准</option>
+                  <option value="deepseek">DeepSeek</option>
+                </select>
+              </label>
+              <label class="native-form-field"
+                ><span>鉴权方式</span>
+                <select v-model="form.authScheme">
+                  <option value="auto">跟随协议（推荐）</option>
+                  <option value="bearer">Authorization: Bearer</option>
+                  <option value="x_api_key">x-api-key</option>
+                </select>
+                <small>默认 OpenAI 使用 Bearer；Claude 使用 x-api-key。</small>
+              </label>
+              <label class="native-form-field"
+                ><span>密钥提供方式</span
+                ><select v-model="form.credentialSource">
+                  <option value="stored">在本页面加密保存</option>
+                  <option value="environment">由部署环境提供</option>
+                </select></label
+              >
+              <UFormField
+                v-if="form.credentialSource === 'stored' && form.credentialConfigured"
+                label="已保存的密钥"
+              >
+                <UCheckbox v-model="form.clearApiKey" label="删除原来的密钥" />
+              </UFormField>
+            </div>
+            <p>密钥在本页加密保存，或通过环境变量注入。</p>
+          </details>
         </section>
 
         <section class="provider-form-section">
           <h3>模型选择</h3>
-          <p>先添加服务实际支持的模型名称，再选一个默认工作模型。首次配置只需要完成这两项。</p>
-          <el-form-item label="这个服务可以使用哪些模型？">
-            <el-select
+          <p>从上游获取列表，勾选允许使用的模型，再选择默认工作模型。</p>
+          <ModelCatalog
+            :items="upstreamModels"
+            :selected="availableModels"
+            :loading="discovering"
+            :error="discoveryError"
+            :fetched="discoveryFetched"
+            :truncated="discoveryTruncated"
+            @refresh="fetchModels"
+            @toggle="toggleUpstreamModel"
+          />
+          <UFormField label="已选模型（也可手动添加 ID）">
+            <UInputTags
               v-model="form.allowedModels"
-              multiple
-              filterable
-              allow-create
-              default-first-option
-              placeholder="输入模型名称后按回车，可添加多个"
-              @change="syncAllowedModels"
-            >
-              <el-option
-                v-for="model in availableModels"
-                :key="model"
-                :label="model"
-                :value="model"
-              />
-            </el-select>
-          </el-form-item>
-          <el-form-item label="默认工作模型（推荐）">
-            <el-select
-              v-model="form.defaultModel"
-              clearable
-              placeholder="选择后会自动分配给所有工作阶段"
-              @change="applyDefaultModel"
-            >
-              <el-option
-                v-for="model in availableModels"
-                :key="model"
-                :label="model"
-                :value="model"
-              />
-            </el-select>
-          </el-form-item>
+              class="w-full"
+              placeholder="输入模型名称后按回车"
+              @update:model-value="syncAllowedModels"
+            />
+          </UFormField>
+          <label class="native-form-field"
+            ><span>默认工作模型（推荐）</span
+            ><select v-model="form.defaultModel" @change="applyDefaultModel(form.defaultModel)">
+              <option value="">自动继承 / 未指定</option>
+              <option v-for="model in availableModels" :key="model" :value="model">
+                {{ model }}
+              </option>
+            </select></label
+          >
+
+          <ModelReasoningSettings
+            v-model="form.modelSettings"
+            :models="availableModels"
+            :connection="verificationConnection"
+            @busy="verifyingModel = $event"
+          />
 
           <details class="provider-advanced">
             <summary>按工作阶段分别选择模型（可选）</summary>
             <p>只有在不同阶段需要不同模型时才修改；留在默认值即可使用上面的工作模型。</p>
             <div class="binding-list">
               <label v-for="logical in logicalModels" :key="logical">
-                <span><strong>{{ logicalModelLabel(logical) }}</strong></span>
-                <el-select
-                  v-model="form.modelBindings[logical]"
-                  clearable
-                  placeholder="使用默认工作模型"
+                <span
+                  ><strong>{{ logicalModelLabel(logical) }}</strong></span
                 >
-                  <el-option
-                    v-for="model in availableModels"
-                    :key="model"
-                    :label="model"
-                    :value="model"
-                  />
-                </el-select>
+                <select v-model="form.modelBindings[logical]">
+                  <option value="">自动继承 / 未指定</option>
+                  <option v-for="model in availableModels" :key="model" :value="model">
+                    {{ model }}
+                  </option>
+                </select>
               </label>
             </div>
           </details>
@@ -670,7 +867,7 @@ onMounted(() => {
 
         <section class="provider-form-section">
           <details class="provider-advanced">
-            <summary>给任务管家或群成员单独选模型（可选）</summary>
+            <summary>为 Agent 单独选择模型（可选）</summary>
             <p>单独设置会优先于阶段默认值；不选择时会自动继承。</p>
             <div class="binding-list">
               <label v-for="target in bindTargets" :key="target.id">
@@ -678,18 +875,12 @@ onMounted(() => {
                   <strong>{{ target.displayName }}</strong>
                   <small>{{ target.description }}</small>
                 </span>
-                <el-select
-                  v-model="form.agentBindings[target.id]"
-                  clearable
-                  placeholder="自动继承"
-                >
-                  <el-option
-                    v-for="model in availableModels"
-                    :key="model"
-                    :label="model"
-                    :value="model"
-                  />
-                </el-select>
+                <select v-model="form.agentBindings[target.id]">
+                  <option value="">自动继承 / 未指定</option>
+                  <option v-for="model in availableModels" :key="model" :value="model">
+                    {{ model }}
+                  </option>
+                </select>
               </label>
             </div>
           </details>
@@ -699,42 +890,54 @@ onMounted(() => {
           <details class="provider-advanced">
             <summary>高级兼容与网络选项（通常不用修改）</summary>
             <div class="provider-form-grid provider-advanced-grid">
-              <el-form-item label="结构化内容格式">
-                <el-select v-model="form.structuredOutputMode">
-                  <el-option label="自动选择" value="" />
-                  <el-option label="严格结构化格式" value="json_schema" />
-                  <el-option label="通用 JSON 对象" value="json_object" />
-                </el-select>
-              </el-form-item>
-              <el-form-item label="输出长度参数">
-                <el-select v-model="form.chatTokenParameter">
-                  <el-option label="自动选择" value="" />
-                  <el-option label="新版兼容参数" value="max_completion_tokens" />
-                  <el-option label="传统兼容参数" value="max_tokens" />
-                </el-select>
-              </el-form-item>
-              <el-form-item label="请求超时（秒）">
-                <el-input-number v-model="form.timeoutSeconds" :min="1" :max="600" />
-              </el-form-item>
-              <el-form-item label="同时请求数">
-                <el-input-number v-model="form.maxConcurrency" :min="1" :max="256" />
-              </el-form-item>
+              <label class="native-form-field"
+                ><span>结构化内容格式</span
+                ><select v-model="form.structuredOutputMode">
+                  <option value="">
+                    {{ form.apiFamily === 'messages' ? 'JSON 提示词（网关兼容）' : '自动选择' }}
+                  </option>
+                  <option value="json_schema">严格 JSON Schema（需上游支持）</option>
+                  <option value="json_object">通用 JSON 对象</option>
+                </select></label
+              >
+              <label v-if="form.apiFamily === 'chat_completions'" class="native-form-field"
+                ><span>输出长度参数</span
+                ><select v-model="form.chatTokenParameter">
+                  <option value="">自动选择</option>
+                  <option value="max_completion_tokens">新版兼容参数</option>
+                  <option value="max_tokens">传统兼容参数</option>
+                </select></label
+              >
+              <UFormField label="请求超时（秒）">
+                <UInputNumber v-model="form.timeoutSeconds" :min="1" :max="600" class="w-full" />
+              </UFormField>
+              <UFormField label="同时请求数">
+                <UInputNumber v-model="form.maxConcurrency" :min="1" :max="256" class="w-full" />
+              </UFormField>
             </div>
             <div class="provider-switches">
-              <el-checkbox v-model="form.storeResponses">允许服务端保留 Responses 响应</el-checkbox>
-              <el-checkbox v-model="form.allowPrivateNetwork">允许连接局域网或本机服务</el-checkbox>
-              <el-checkbox v-model="form.allowInsecureHttp">允许使用不加密的 HTTP 地址</el-checkbox>
+              <UCheckbox
+                v-if="form.apiFamily === 'responses'"
+                v-model="form.storeResponses"
+                label="允许服务端保留 Responses 响应"
+              />
             </div>
           </details>
         </section>
 
         <div class="provider-form-actions">
-          <el-button @click="cancelEdit">取消</el-button>
-          <el-button type="primary" :icon="CircleCheck" :loading="saving" @click="saveProvider">
+          <UButton @click="cancelEdit" color="neutral" variant="outline">取消</UButton>
+          <UButton
+            color="neutral"
+            icon="i-lucide-circle-check"
+            :loading="saving"
+            :disabled="verifyingModel"
+            @click="saveProvider"
+          >
             保存设置
-          </el-button>
+          </UButton>
         </div>
-      </el-form>
+      </form>
     </div>
   </section>
 </template>

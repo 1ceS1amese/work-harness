@@ -25,8 +25,8 @@ providers:
     capabilities: [chat, structured_output, tool_calling]
     timeout_seconds: 60
     max_concurrency: 8
-    allow_insecure_http: false
-    allow_private_network: false
+    allow_insecure_http: null
+    allow_private_network: null
 logical_models:
   planner-strong:
     required_capabilities: [chat, structured_output]

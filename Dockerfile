@@ -2,7 +2,7 @@
 
 ARG NODE_IMAGE=node:22-bookworm-slim
 ARG PYTHON_IMAGE=python:3.12-slim-bookworm
-ARG UV_IMAGE=ghcr.io/astral-sh/uv:0.12.0
+ARG UV_IMAGE=ghcr.io/astral-sh/uv:0.13.4
 
 FROM ${NODE_IMAGE} AS frontend-builder
 WORKDIR /build/frontend

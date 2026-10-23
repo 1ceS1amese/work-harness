@@ -32,6 +32,7 @@ classifiers = [
   "Topic :: Software Development :: Libraries :: Application Frameworks",
 ]
 dependencies = [
+  "certifi>=2026.10.19",
   "cryptography>=45,<47",
   "fastapi>=0.116,<1",
   "httpx>=0.28,<1",

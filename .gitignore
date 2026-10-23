@@ -17,3 +17,8 @@ deploy/runtime.distributed.env
 evaluation/reports/*.json
 !evaluation/reports/.gitkeep
 *:Zone.Identifier
+
+# Frontend build metadata and browser test artifacts
+frontend/.nuxt-ui/
+frontend/test-results/
+frontend/playwright-report/

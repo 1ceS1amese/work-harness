@@ -49,6 +49,7 @@ class WorkflowNodes(AgentServices):
                 risk = RiskLevel.HIGH
             task = TaskSpec(
                 goal=request.goal,
+                model_selection=request.model_selection,
                 context=request.context,
                 constraints=request.constraints,
                 expected_output=request.expected_output,
@@ -413,6 +414,7 @@ class WorkflowNodes(AgentServices):
                 node_name="synthesize",
                 agent_role="synthesizer",
                 logical_model=role.logical_model,
+                model_selection=state["task"].get("model_selection"),
                 messages=[
                     ModelMessage(role="system", content=prompt.body),
                     ModelMessage(

@@ -659,7 +659,22 @@ src/work_harness/storage/
 Agent；请求也可选择成员和每个成员的单一功能。多个功能的单成员映射尚不支持。
 阶段 5 已接通 PostgreSQL 黑板执行；6.4 后 API/Worker 新请求也默认使用黑板，旧引擎可显式选择。
 
-例如，明确只要求保存候选草稿的请求为：
+网页完成条件现按交付物提供三种模板：
+
+- `analysis-report`（分析报告）：结论摘要、分析依据、风险与局限、建议行动。
+- `implementation-plan`（实施方案）：目标与范围、实施步骤、验收标准、风险与回退。
+- `action-checklist`（操作清单）：适用范围与前提、操作步骤、检查与确认；步骤须含 Markdown 待办项。
+
+模板是目标验收合同，不是固定的 Agent 执行顺序。`/v1/capabilities` 返回可选模板及其完整输入；
+客户端原样提交。相应知识源将文档要求传入 Worker，宿主验证附件摘要、长度、必要章节正文，
+并对清单验证待办项。验证成功才生成 `deliverable.<模板 ID>` 的 delivery Fact，范围为
+`verification=stored_content_and_structure`；检查项为 `content_stored`、`required_sections_present`，
+清单额外要求 `checklist_items_present`。缺失章节、纯占位或代码块内的模板示例不能满足完成条件。
+这里验证的是文档存储与结构，不是内容真实性，也不证明文档中的实施、测试、部署已经发生。
+新合同使用 `document-delivery-v1` 策略；旧 `saved-draft` 的合同和执行策略保持兼容。
+CLI 支持相同的三个模板 ID，也保留 `saved-draft`。
+
+例如，兼容旧客户端、明确只要求保存候选草稿的请求为：
 
 ```json
 {

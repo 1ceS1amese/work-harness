@@ -7,6 +7,7 @@ from contextlib import closing
 from pathlib import Path
 
 from work_harness.domain.models import utc_now
+from work_harness.storage.async_utils import write_in_thread
 from work_harness.storage.provider_base import (
     ProviderProfileRecord,
     ProviderProfileSpec,
@@ -33,7 +34,7 @@ class SQLiteProviderProfileStore:
     async def initialize(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         await asyncio.to_thread(self._cipher.initialize)
-        await asyncio.to_thread(self._initialize_sync)
+        await write_in_thread(self._initialize_sync)
 
     def _initialize_sync(self) -> None:
         with closing(self._connect()) as connection:
@@ -67,7 +68,8 @@ class SQLiteProviderProfileStore:
             connection.commit()
 
     async def close(self) -> None:
-        return None
+        async with self._write_lock:
+            pass
 
     async def upsert(
         self,
@@ -78,7 +80,7 @@ class SQLiteProviderProfileStore:
         clear_api_key: bool = False,
     ) -> ProviderProfileRecord:
         async with self._write_lock:
-            return await asyncio.to_thread(
+            return await write_in_thread(
                 self._upsert_sync,
                 name,
                 profile,
@@ -188,7 +190,7 @@ class SQLiteProviderProfileStore:
 
     async def delete(self, name: str) -> None:
         async with self._write_lock:
-            await asyncio.to_thread(self._delete_sync, name)
+            await write_in_thread(self._delete_sync, name)
 
     def _delete_sync(self, name: str) -> None:
         with closing(self._connect()) as connection:

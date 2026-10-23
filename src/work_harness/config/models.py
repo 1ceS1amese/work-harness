@@ -15,6 +15,8 @@ from pydantic import (
     model_validator,
 )
 
+from work_harness.config.endpoints import normalize_model_url
+from work_harness.config.reasoning import ModelSettings
 from work_harness.domain.enums import RiskLevel, ToolCategory
 
 
@@ -165,7 +167,8 @@ class ProviderConfig(ConfigModel):
 
     adapter: str = Field(pattern=r"^[a-z][a-z0-9_]{1,63}$")
     protocol_variant: Literal["openai", "deepseek"] = "openai"
-    api_family: Literal["chat_completions", "responses"] = "chat_completions"
+    api_family: Literal["chat_completions", "responses", "messages"] = "chat_completions"
+    auth_scheme: Literal["auto", "bearer", "x_api_key"] = "auto"
     structured_output_mode: Literal["json_schema", "json_object"] | None = None
     chat_token_parameter: Literal["max_completion_tokens", "max_tokens"] | None = None
     store_responses: bool = False
@@ -175,18 +178,21 @@ class ProviderConfig(ConfigModel):
     credential_source: Literal["environment", "stored"] = "environment"
     api_key_env: str | None = Field(default=None, pattern=r"^[A-Za-z_][A-Za-z0-9_]*$")
     allowed_models: list[str] = Field(default_factory=list)
+    model_settings: dict[str, ModelSettings] = Field(default_factory=dict)
     capabilities: set[str] = Field(default_factory=set)
     timeout_seconds: float = Field(default=60, gt=0)
     max_concurrency: int = Field(default=8, ge=1, le=256)
-    allow_insecure_http: bool = False
-    allow_private_network: bool = False
+    # None follows the configured address automatically; explicit deployment restrictions survive.
+    allow_insecure_http: bool | None = None
+    allow_private_network: bool | None = None
     options: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("base_url")
     @classmethod
     def reject_credentials_in_base_url(cls, value: str | None) -> str | None:
-        if value is None:
+        if not value:
             return None
+        value = normalize_model_url(value)
         parsed = urlparse(value)
         if parsed.username or parsed.password:
             raise ValueError("provider base_url cannot contain credentials")
@@ -221,17 +227,20 @@ class ProviderConfig(ConfigModel):
 
     @model_validator(mode="after")
     def validate_provider_contract(self) -> ProviderConfig:
+        if self.adapter == "anthropic" and self.api_family != "messages":
+            raise ValueError("anthropic adapter requires messages api_family")
+        if self.adapter == "openai_compatible" and self.api_family == "messages":
+            raise ValueError("messages api_family requires anthropic adapter")
         if (
-            self.adapter == "openai_compatible"
+            self.adapter in {"openai_compatible", "anthropic"}
             and self.credential_source == "stored"
             and self.api_key_env
         ):
             raise ValueError("stored credentials cannot also configure api_key_env")
-        if self.adapter == "openai_compatible" and self.enabled:
+        if self.adapter in {"openai_compatible", "anthropic"} and self.enabled:
             if not (self.base_url or self.base_url_env) or not self.allowed_models:
                 raise ValueError(
-                    "enabled openai_compatible provider requires base_url or "
-                    "base_url_env and allowed_models"
+                    "enabled HTTP provider requires base_url or base_url_env and allowed_models"
                 )
             if self.credential_source == "environment" and not self.api_key_env:
                 raise ValueError("environment credentials require api_key_env")

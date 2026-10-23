@@ -7,12 +7,7 @@ export interface RunStage {
 }
 
 export const ACTIVE_RUN_STATUSES: RunStatus[] = ['pending', 'running']
-export const TERMINAL_RUN_STATUSES: RunStatus[] = [
-  'succeeded',
-  'partial',
-  'failed',
-  'cancelled',
-]
+export const TERMINAL_RUN_STATUSES: RunStatus[] = ['succeeded', 'partial', 'failed', 'cancelled']
 
 export const STATUS_LABELS: Record<RunStatus, string> = {
   pending: '排队中',
@@ -42,10 +37,18 @@ export function getRunStage(run: RunResult): RunStage {
     return { label: '都搞定了', description: '大家已经把结果整理好了。', progress: 100 }
   }
   if (run.status === 'partial') {
-    return { label: '先完成了一部分', description: '能做的部分已经整理好了，还有些问题需要留意。', progress: 100 }
+    return {
+      label: '先完成了一部分',
+      description: '能做的部分已经整理好了，还有些问题需要留意。',
+      progress: 100,
+    }
   }
   if (run.status === 'failed') {
-    return { label: '这次没做完', description: '处理时碰到了问题，可以看看详细记录。', progress: 100 }
+    return {
+      label: '这次没做完',
+      description: '处理时碰到了问题，可以看看详细记录。',
+      progress: 100,
+    }
   }
   if (run.status === 'cancelled') {
     return { label: '已经停下来了', description: '大家已经停止处理这件事。', progress: 100 }
@@ -54,10 +57,18 @@ export function getRunStage(run: RunResult): RunStage {
     return { label: '等你确认', description: '这一步风险比较高，大家先等你点头。', progress: 90 }
   }
   if (!run.task) {
-    return { label: '正在看你的消息', description: '先把你想做的事和需要注意的地方捋清楚…', progress: 10 }
+    return {
+      label: '正在看你的消息',
+      description: '先把你想做的事和需要注意的地方捋清楚…',
+      progress: 10,
+    }
   }
   if (!run.plan) {
-    return { label: '正在安排分工', description: '任务管家正在拆分事情，再叫合适的成员来做…', progress: 24 }
+    return {
+      label: '正在安排分工',
+      description: '任务管家正在拆分事情，再叫合适的成员来做…',
+      progress: 24,
+    }
   }
 
   const subtaskTotal = Math.max(run.plan.subtasks.length, 1)
@@ -88,7 +99,11 @@ export function getRunStage(run: RunResult): RunStage {
     }
   }
   if (!run.decision) {
-    return { label: '正在做最后检查', description: '看看能不能直接交付，还是需要再补一补…', progress: 84 }
+    return {
+      label: '正在做最后检查',
+      description: '看看能不能直接交付，还是需要再补一补…',
+      progress: 84,
+    }
   }
   return { label: '正在整理回复', description: '把大家的结果合在一起，马上发给你…', progress: 94 }
 }
@@ -108,10 +123,10 @@ export function resultMessage(run: RunResult): string {
   return getRunStage(run).description
 }
 
-export function statusTagType(status: RunStatus): 'success' | 'warning' | 'danger' | 'info' {
+export function statusTagType(status: RunStatus): 'success' | 'warning' | 'error' | 'info' {
   if (status === 'succeeded') return 'success'
   if (status === 'waiting_human' || status === 'partial') return 'warning'
-  if (status === 'failed' || status === 'cancelled') return 'danger'
+  if (status === 'failed' || status === 'cancelled') return 'error'
   return 'info'
 }
 

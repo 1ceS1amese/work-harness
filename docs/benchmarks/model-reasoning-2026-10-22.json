@@ -1,0 +1,66 @@
+{
+  "tested_at": "2026-10-22T14:18:35.022504Z",
+  "model": "gpt-5.6-sol",
+  "api_family": "responses",
+  "scope": "Existing configured channel; inference requests with a fixed JSON probe and unused tool definition",
+  "confirmation": "User explicitly confirmed this channel applies reasoning parameters. The channel also accepts an invalid effort string, so these are channel-confirmed results, not upstream parameter-validation results.",
+  "default_effort": null,
+  "checks": [
+    {
+      "effort": null,
+      "status": "supported",
+      "detail": "默认调用通过",
+      "accepted": true,
+      "source": "default"
+    },
+    {
+      "effort": "none",
+      "status": "supported",
+      "detail": "调用通过；推理参数由渠道使用者确认",
+      "accepted": true,
+      "source": "channel_confirmation"
+    },
+    {
+      "effort": "minimal",
+      "status": "unverified",
+      "detail": "请求成功，但上游未证明校验推理参数；保留默认",
+      "accepted": true,
+      "source": "unknown"
+    },
+    {
+      "effort": "low",
+      "status": "supported",
+      "detail": "调用通过；推理参数由渠道使用者确认",
+      "accepted": true,
+      "source": "channel_confirmation"
+    },
+    {
+      "effort": "medium",
+      "status": "supported",
+      "detail": "调用通过；推理参数由渠道使用者确认",
+      "accepted": true,
+      "source": "channel_confirmation"
+    },
+    {
+      "effort": "high",
+      "status": "supported",
+      "detail": "调用通过；推理参数由渠道使用者确认",
+      "accepted": true,
+      "source": "channel_confirmation"
+    },
+    {
+      "effort": "xhigh",
+      "status": "supported",
+      "detail": "调用通过；推理参数由渠道使用者确认",
+      "accepted": true,
+      "source": "channel_confirmation"
+    },
+    {
+      "effort": "max",
+      "status": "supported",
+      "detail": "调用通过；推理参数由渠道使用者确认",
+      "accepted": true,
+      "source": "channel_confirmation"
+    }
+  ]
+}

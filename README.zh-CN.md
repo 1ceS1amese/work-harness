@@ -77,11 +77,11 @@ Work Harness 是一个用于运行、查看和恢复多 Agent 任务的框架与
 - **可查看的执行过程：** 目标缺口、对象历史、证据、附件、知识关系图、实时运行更新和持久事件查询。
 - **故障恢复：** 单应用进程使用 SQLite；API/Worker 分离时使用 PostgreSQL、持久队列和执行租约，
   支持取消、故障接管与恢复。
-- **模型与能力配置：** 自定义 OpenAI 兼容端点、Chat Completions / Responses、DeepSeek 协议方言、
+- **模型与能力配置：** HTTP / HTTPS 上游、Chat Completions / Responses / Claude Messages、上游模型发现与选择、DeepSeek 协议方言、
   独立 Agent 路由、提示词、Tool 和 Skill。
 - **旧引擎兼容：** 通过 `engine=legacy` 显式使用原有的规划、执行、复核和汇总流程。
 
-新任务默认使用 **`blackboard`**。当前内置产品知识源围绕候选草稿的探索与存储验证工作；若要
+新任务默认使用 **`blackboard`**。内置知识源生成分析报告、实施方案和操作清单，并验证成果存储与章节结构；若要
 确认领域事实或业务操作，需要接入相应的 Tool 和验证器。模型自报置信度不能直接形成 Fact。
 
 <a id="built-with"></a>
@@ -92,7 +92,7 @@ Work Harness 是一个用于运行、查看和恢复多 Agent 任务的框架与
 | --- | --- |
 | Agent 执行 | Python、LangGraph |
 | API 与数据契约 | FastAPI、Pydantic |
-| 网页工作台 | Vue 3、TypeScript、Vite、Element Plus |
+| 网页工作台 | Vue 3、Nuxt UI、官方 Vue Dashboard 模板、TypeScript、Vite |
 | 持久化 | SQLite、PostgreSQL、LangGraph Checkpoint |
 | 桌面打包 | pywebview、PyInstaller、Windows WebView2 |
 | 验证工具 | pytest、Vitest、Ruff、GitHub Actions |
@@ -134,9 +134,9 @@ uv run work-harness serve --host 127.0.0.1 --port 8000
 
 打开[本地工作台](http://127.0.0.1:8000/)，然后：
 
-1. 进入“设置 → 模型设置”，填写 Provider 地址、凭据和模型名称，选择服务支持的 API 类型与
-   结构化输出模式。
-2. 为默认协调组或单独的 Agent 分配模型并保存。
+1. 进入“设置 → 模型连接”，选择 Responses、Chat Completions 或 Claude Messages，填写上游地址与 API Key。
+   可连接官方服务或 new-api / sub2api 网关；使用 HTTP 或本机地址时打开相应连接开关。
+2. 点击“获取模型”，搜索并勾选模型，再设置默认模型或单独分配给 Agent。也可手动填写模型 ID，启用连接后保存。
 3. 重启服务，使暂存配置生效。模型配置可用前，就绪检查和任务提交保持不可用。
 4. 创建会话、填写目标，并明确选择完成条件。
 
@@ -187,8 +187,10 @@ SQLite 仅支持一个应用进程；多个执行 Worker 使用 PostgreSQL。环
 选择目标、完成条件及需要的 Skill 或 Agent 分工。打开任务详情，可以查看尚未满足的目标、
 事实、探索方向、提示及其关系。人工补充会绑定对应的 Intent 和板面版本。
 
-内置的“**保存候选草稿**”完成条件只验证内容已经保存且可以读取，**不证明事实准确性、答案质量
-或外部操作已经完成**。普通自由文本不会被自动转换为这一较弱的验收条件。
+完成条件按交付物选择：**分析报告**（结论、依据、风险与建议）、**实施方案**（范围、步骤、验收与回退）、
+**操作清单**（前提、待办项与检查方法）。选择后会将相应要求传给 Agent；后端核对保存内容及必要章节，
+操作清单还须包含待办项。结构检查不代表内容事实已核实或文档中的操作已经执行。
+旧的 `saved-draft` 合同仍可通过 CLI / API 使用，保留原有的仅存储验证行为。
 
 设置入口为 `/settings?section=models`、`/settings?section=prompts` 和 `/settings?section=runtime`。
 部分提示词和复核选项属于旧引擎；黑板中的 Agent 保留各自的私有执行逻辑。
@@ -200,9 +202,9 @@ SQLite 仅支持一个应用进程；多个执行 Worker 使用 PostgreSQL。环
 完成模型配置后：
 
 ```bash
-# 默认使用黑板；显式接受已保存的候选草稿。
+# 默认使用黑板；选择需要交付的文档类型。
 uv run work-harness run \
-  --goal "起草项目介绍" --acceptance-template saved-draft
+  --goal "为团队设计项目上线方案" --acceptance-template implementation-plan
 
 # 显式选择旧版规划与复核流程。
 uv run work-harness run --engine legacy --goal "审查这份交付计划"
@@ -290,8 +292,7 @@ curl --request POST http://127.0.0.1:8000/v1/runs \
 人工输入、SQLite/PostgreSQL 恢复、备份回退路径及默认引擎切换均已实现。Token 记账已与花销额度
 控制分离。详细实施记录统一保留在[现有设计计划](docs/blackboard-design.md)中。
 
-源码验证覆盖 SQLite 和真实 PostgreSQL 16 API/Worker。后端回归与复测覆盖记账、失败、恢复和
-兼容性；最近记录的前端测试为 **57 项通过**，类型检查与生产构建通过。此前使用 `gpt-5.6-sol`
+后端全量回归与专项复测共 **927 个不同用例验证通过**，覆盖 SQLite、真实 PostgreSQL 16 API/Worker、记账、失败、恢复和兼容性。已优化设置读取、运行历史索引和超时/取消处理，测量范围见 [后端性能记录](docs/backend-performance.md)；前端 **57 项组件/状态测试及 38 项桌面/手机浏览器回归通过**，类型检查与生产构建通过。工作台采用参考 Codex 风格的统一布局：深浅色任务主页、可搜索会话导航、共用单侧栏的独立设置页、统一折叠的任务设置、聊天框右下角模型选择、设置页逐模型推理验证和按需打开的黑板详情，见 [GUI 设计与验收](docs/gui-design.md)。此前使用 `gpt-5.6-sol`
 完成的六任务对照中，黑板通过 **6/6**，legacy 通过 **1/6**。这只是有限任务集的结果，不代表
 通用任务质量；该对照早于最新 Token 重构。日期、测试批次和评估范围见[开发记录](docs/development-status.md)。
 
@@ -330,6 +331,13 @@ npm --prefix frontend test
 npm --prefix frontend run build
 ```
 
+构建后可运行浏览器回归（使用隔离的 API 响应样例，不调用真实模型）：
+
+```bash
+npm --prefix frontend exec -- playwright install chromium
+npm --prefix frontend run test:e2e
+```
+
 PostgreSQL 测试需要将 `WORK_HARNESS_TEST_DATABASE_URL` 指向专用测试数据库，未配置时会跳过。
 数据库、打包与部署检查见[贡献指南](CONTRIBUTING.md)。安全漏洞请按 [SECURITY.md](SECURITY.md)
 中的私密渠道报告。
@@ -357,7 +365,8 @@ PostgreSQL 测试需要将 `WORK_HARNESS_TEST_DATABASE_URL` 指向专用测试�
 - [Best-README-Template](https://github.com/othneildrew/Best-README-Template)：README 组织结构。
 - [LangGraph](https://github.com/langchain-ai/langgraph)、[FastAPI](https://fastapi.tiangolo.com/) 和
   [Pydantic](https://docs.pydantic.dev/)：执行与 API 基础。
-- [Vue](https://vuejs.org/)、[Element Plus](https://element-plus.org/)、
+- [官方 Vue Dashboard 模板](https://github.com/nuxt-ui-templates/dashboard-vue)（[MIT 许可](docs/licenses/nuxt-ui-dashboard.txt)）。
+- [Vue](https://vuejs.org/)、[Nuxt UI](https://ui.nuxt.com/)、
   [pywebview](https://pywebview.flowrl.com/) 和 [PyInstaller](https://pyinstaller.org/)：工作台与桌面工具链。
 
 <p align="right">(<a href="#readme-top">返回顶部</a>)</p>

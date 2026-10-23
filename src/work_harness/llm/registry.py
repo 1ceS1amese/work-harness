@@ -51,6 +51,7 @@ class ProviderAdapterRegistry:
 
 
 def build_default_provider_registry() -> ProviderAdapterRegistry:
+    from work_harness.llm.anthropic import AnthropicProvider
     from work_harness.llm.mock import MockProvider
     from work_harness.llm.openai_compatible import OpenAICompatibleProvider
 
@@ -60,5 +61,6 @@ def build_default_provider_registry() -> ProviderAdapterRegistry:
         "openai_compatible",
         lambda name, config: OpenAICompatibleProvider(name, config),
     )
+    registry.register("anthropic", lambda name, config: AnthropicProvider(name, config))
     registry.load_entry_points()
     return registry
